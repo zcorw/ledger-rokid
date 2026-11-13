@@ -5,7 +5,7 @@
 import wx from 'wx';
 import { createCaptureController } from '../../lib/capture.js';
 export default {
-  data: { message: '仅使用虚构测试收据。照片仅保留在内存中，不上传。', busy: false },
+  data: { message: '仅使用虚构测试收据。照片仅保留在内存中，不上传。', busy: false, selectedAction: 'capture', hostTarget: 'unknown', entryHint: '聊天卡片请双击进入全屏，再确认拍摄。全屏内上下选择，确认键执行。' },
   onLoad() {
     this.controller = createCaptureController({
       cameraFactory: () => wx.media?.createCameraContext?.(),
@@ -17,13 +17,41 @@ export default {
   },
   onHide() { this.controller?.discard(); },
   onUnload() { this.controller?.close(); },
-  capture() { return this.controller?.capture(); },
+  onTargetChanged(target) {
+    this.setData({
+      hostTarget: target,
+      entryHint: target === '_blank'
+        ? '全屏：上下选择拍摄或清除，确认键执行；返回键退出。'
+        : '聊天卡片请双击进入全屏后拍摄；卡片中不能使用相机。',
+    });
+    if (target !== '_blank') this.controller?.discard();
+  },
+  onKeyUp(event) {
+    // Leave card activation, Backspace and voice wakeup to the host.
+    if (this.data.hostTarget !== '_blank' || event.repeat) return;
+    if (event.code === 'ArrowUp' || event.code === 'ArrowDown') {
+      event.preventDefault();
+      this.setData({ selectedAction: this.data.selectedAction === 'capture' ? 'discard' : 'capture' });
+    } else if (event.code === 'Enter') {
+      event.preventDefault();
+      if (this.data.selectedAction === 'discard') this.discard();
+      else return this.capture();
+    }
+  },
+  capture() {
+    if (this.data.hostTarget === '_current') {
+      this.setData({ message: '请先双击进入全屏，再选择拍摄测试收据。' });
+      return false;
+    }
+    return this.controller?.capture();
+  },
   discard() { this.controller?.discard(); },
 };
 </script>
-<page><view class="screen"><text class="heading">知产 · 收据拍摄原型</text><text class="message">{{message}}</text><button bindtap="capture" disabled="{{busy}}">拍摄测试收据</button><button bindtap="discard">清除 / 取消</button></view></page>
+<page><view class="screen"><text class="heading">知产 · 收据拍摄原型</text><text class="hint">{{entryHint}}</text><text class="selection">当前选择：{{selectedAction === 'capture' ? '拍摄测试收据' : '清除 / 取消'}}</text><text class="message">{{message}}</text><button bindtap="capture" disabled="{{busy}}">拍摄测试收据</button><button bindtap="discard">清除 / 取消</button></view></page>
 <style>
 .screen { width:100%; height:100%; box-sizing:border-box; padding:24px; background-color:#000000; color:#40ff5e; display:flex; flex-direction:column; }
 .heading { font-size:28px; margin-bottom:20px; }
+.hint, .selection { font-size:20px; margin-bottom:12px; }
 .message { font-size:22px; flex:1; }
 </style>

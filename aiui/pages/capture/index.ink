@@ -17,11 +17,12 @@ export default {
   },
   onHide() { this.controller?.discard(); },
   onUnload() { this.controller?.close(); },
+  reviewDemo() { wx.navigateTo({ url: "/pages/review/index" }); },
   capture() { return this.controller?.capture(); },
   discard() { this.controller?.discard(); },
 };
 </script>
-<page><view class="screen"><text class="heading">知产 · 收据拍摄原型</text><text class="message">{{message}}</text><button bindtap="capture" disabled="{{busy}}">拍摄测试收据</button><button bindtap="discard">清除 / 取消</button></view></page>
+<page><view class="screen"><text class="heading">知产 · 收据拍摄原型</text><text class="message">{{message}}</text><button bindtap="capture" disabled="{{busy}}">拍摄测试收据</button><button bindtap="discard">清除 / 取消</button><button bindtap="reviewDemo">虚构字段确认演示（非照片识别）</button></view></page>
 <style>
 .screen { width:100%; height:100%; box-sizing:border-box; padding:24px; background-color:#000000; color:#40ff5e; display:flex; flex-direction:column; }
 .heading { font-size:28px; margin-bottom:20px; }

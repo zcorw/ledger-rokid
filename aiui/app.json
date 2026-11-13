@@ -1,1 +1,18 @@
-{"name":"知产 Rokid","description":"Local-only receipt capture capability prototype","pages":["pages/capture/index"],"permissions":["CAMERA"],"window":{"navigationBarTitleText":"知产拍摄测试","navigationBarBackgroundColor":"#000000","viewport":{"width":"device-width"}}}
+{
+  "name": "知产 Rokid",
+  "description": "Local-only receipt capture capability prototype",
+  "pages": [
+    "pages/capture/index",
+    "pages/review/index"
+  ],
+  "permissions": [
+    "CAMERA"
+  ],
+  "window": {
+    "navigationBarTitleText": "知产拍摄测试",
+    "navigationBarBackgroundColor": "#000000",
+    "viewport": {
+      "width": "device-width"
+    }
+  }
+}

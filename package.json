@@ -1,0 +1,1 @@
+{"name":"ledger-rokid","version":"0.1.0","private":true,"type":"module","scripts":{"test":"node --test","check":"node --check aiui/lib/capture.js && node --check aiui/app.js"},"engines":{"node":">=22"}}

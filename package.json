@@ -1,1 +1,16 @@
-{"name":"ledger-rokid","version":"0.1.0","private":true,"type":"module","scripts":{"test":"node --test","check":"node --check aiui/lib/capture.js && node --check aiui/app.js"},"engines":{"node":">=22"}}
+{
+  "name": "ledger-rokid",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test",
+    "check": "node --check aiui/lib/capture.js && node --check aiui/app.js && node --check aiui/lib/review.js"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "devDependencies": {
+    "playwright": "1.56.1"
+  }
+}

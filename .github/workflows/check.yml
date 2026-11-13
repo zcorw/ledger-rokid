@@ -1,4 +1,4 @@
-name: Capture prototype checks
+name: Prototype checks
 on:
   push:
     branches: ['feat/**']
@@ -8,10 +8,24 @@ permissions:
 jobs:
   test:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
+          cache: npm
+      - run: npm ci --ignore-scripts
       - run: npm run check
       - run: npm test
+      - run: npx playwright install --with-deps chromium
+      - name: Verify synthetic review in Chromium
+        run: |
+          python3 -m http.server 4386 --bind 127.0.0.1 >/tmp/ledger-preview.log 2>&1 &
+          SERVER_PID=$!
+          trap 'kill "$SERVER_PID"' EXIT
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent http://127.0.0.1:4386/preview/ >/dev/null; then break; fi
+            sleep 1
+          done
+          node qa/review-browser.mjs

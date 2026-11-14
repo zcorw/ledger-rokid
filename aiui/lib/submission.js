@@ -63,6 +63,19 @@ export function createSubmission({ transport, newRequestKey }) {
   }
   return {
     snapshot,
+    restore(saved) {
+      if (state !== 'empty' || !saved || !['ready', 'unknown', 'duplicate_confirmation', 'conflict', 'succeeded'].includes(saved.state)) return false;
+      try {
+        const p = saved.payload;
+        const rebuilt = buildSubmission({ state: 'confirmed', confirmed: p }, p.requestKey, p.source);
+        if (typeof p.allowDuplicate !== 'boolean' || Object.keys(p).length !== Object.keys(rebuilt).length
+            || Object.keys(rebuilt).some(key => key !== 'allowDuplicate' && p[key] !== rebuilt[key])
+            || (saved.state === 'succeeded' && !uuid(saved.recordId))) return false;
+        payload = Object.freeze({ ...rebuilt, allowDuplicate: p.allowDuplicate });
+        state = saved.state; recordId = state === 'succeeded' ? saved.recordId : null;
+        return true;
+      } catch { return false; }
+    },
     prepare(review, source) {
       if (!['empty', 'cancelled', 'succeeded'].includes(state)) return false;
       const next = buildSubmission(review, newRequestKey(), source);

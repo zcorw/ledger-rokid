@@ -29,3 +29,4 @@ jobs:
             sleep 1
           done
           node qa/review-browser.mjs
+          node qa/chain-browser.mjs

@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "test": "node --test",
-    "check": "node --check aiui/lib/capture.js && node --check aiui/app.js && node --check aiui/lib/review.js && node --check aiui/lib/receipt-candidate.js && node --check aiui/lib/submission.js"
+    "check": "node --check aiui/lib/capture.js && node --check aiui/app.js && node --check aiui/lib/review.js && node --check aiui/lib/receipt-candidate.js && node --check aiui/lib/submission.js && node --check aiui/lib/receipt-flow.js && node --check preview/chain.js"
   },
   "engines": {
     "node": ">=22"

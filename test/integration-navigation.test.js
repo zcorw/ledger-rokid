@@ -17,7 +17,6 @@ test('capture selector reaches review in both directions, clears photo before na
   const events = [];
   const p = load('capture', { navigateTo({url}) { events.push(url); } });
   p.controller = { discard() { events.push('discard'); }, capture() { events.push('capture'); } };
-  p.onTargetChanged('_blank');
   press(p, 'ArrowUp'); assert.equal(p.data.selectedAction, 'reviewDemo');
   press(p, 'Enter', true); assert.deepEqual(events, []);
   press(p, 'Enter'); assert.deepEqual(events, ['discard', '/pages/review/index']);
@@ -25,7 +24,7 @@ test('capture selector reaches review in both directions, clears photo before na
   press(p, 'ArrowDown'); press(p, 'ArrowDown'); assert.equal(p.data.selectedAction, 'reviewDemo');
 });
 test('review hardware selector requires preview and separate confirmation, then clears on hide', () => {
-  const p = load('review'); p.onLoad(); p.onTargetChanged('_blank');
+  const p = load('review'); p.onLoad();
   press(p, 'ArrowDown'); press(p, 'ArrowDown'); assert.equal(p.data.selectedAction, 'preview');
   press(p, 'Enter'); assert.equal(p.review.snapshot().state, 'review');
   assert.equal(p.data.selectedAction, 'back');
@@ -33,12 +32,10 @@ test('review hardware selector requires preview and separate confirmation, then 
   press(p, 'Enter', true); assert.equal(p.review.snapshot().confirmed, null);
   press(p, 'Enter'); assert.equal(p.review.snapshot().state, 'confirmed');
   p.onHide(); assert.equal(p.review.snapshot().confirmed, null);
-  assert.equal(press(p, 'Enter').prevented, false);
 });
 test('review preserves native text-input focus and host keys; cancellation is reachable', () => {
   const p = load('review'); p.onLoad();
-  assert.equal(press(p, 'Enter').prevented, false);
-  p.onTargetChanged('_blank'); p.focusInput();
+  p.focusInput();
   assert.equal(press(p, 'ArrowDown').prevented, false);
   assert.equal(press(p, 'Enter').prevented, false);
   p.blurInput();

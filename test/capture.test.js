@@ -3,14 +3,21 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { createCaptureController } from '../aiui/lib/capture.js';
 const image = () => ({ data: new ArrayBuffer(10), mimeType: 'image/jpeg' });
-test('successful capture uses documented options and retains only in memory', async () => {
-  let options;
-  const c = createCaptureController({ cameraFactory: () => ({ takePhoto: async value => { options = value; return image(); } }) });
-  assert.equal(await c.capture(), true);
-  assert.deepEqual(options, { quality: 'high', mode: 'telephoto', enableSystemPreview: true });
-  assert.equal(c.snapshot().state, 'captured');
-  c.discard(); assert.equal(c.snapshot().photo, null);
+test('successful JPEG, PNG and WebP capture preserves bytes, MIME and documented options', async () => {
+  for (const mimeType of ['image/jpeg', 'image/png', 'image/webp']) {
+    let options;
+    const result = { data: new ArrayBuffer(10), mimeType };
+    const c = createCaptureController({ cameraFactory: () => ({ takePhoto: async value => { options = value; return result; } }) });
+    assert.equal(await c.capture(), true);
+    assert.deepEqual(options, { quality: 'high', mode: 'telephoto', enableSystemPreview: true });
+    assert.equal(c.snapshot().state, 'captured');
+    assert.equal(c.snapshot().photo.data, result.data);
+    assert.equal(c.snapshot().photo.mimeType, mimeType);
+    assert.equal(c.snapshot().failure, null);
+    c.discard(); assert.equal(c.snapshot().photo, null);
+  }
 });
+
 test('unsupported camera and denied permission are explicit failures', async () => {
   for (const [factory, state] of [[() => undefined, 'unsupported'], [() => ({ takePhoto: async () => { throw new Error('denied'); } }), 'failed']]) {
     const c = createCaptureController({ cameraFactory: factory });
@@ -44,4 +51,37 @@ test('manifest has camera only and page uses controller lifecycle', () => {
   const script = page.match(/<script setup>([\s\S]*?)<\/script>/)[1].replace(/^import .*;$/gm, '').replace('export default', 'return');
   const definition = new Function('wx', 'createCaptureController', script)({}, createCaptureController);
   assert.equal(typeof definition.onLoad, 'function');
+});
+
+test('native rejection preserves its stage, code and message without guessing permission failure', async () => {
+  const c = createCaptureController({ cameraFactory: () => ({ takePhoto: async () => { throw { errCode: 42, errMsg: 'capture failed' }; } }) });
+  assert.equal(await c.capture(), false);
+  assert.deepEqual(c.snapshot().failure, { stage: 'takePhoto', name: '', code: '42', message: 'capture failed' });
+  c.discard(); assert.equal(c.snapshot().failure, null);
+});
+
+test('invalid photo diagnostics describe the result without retaining its data', async () => {
+  const c = createCaptureController({ cameraFactory: () => ({ takePhoto: async () => ({ data: new Uint8Array(10), mimeType: 'image/jpeg' }) }) });
+  assert.equal(await c.capture(), false);
+  assert.equal(c.snapshot().failure.stage, 'validate');
+  assert.equal(c.snapshot().failure.dataType, 'Uint8Array');
+  assert.equal(c.snapshot().failure.byteLength, 10);
+  assert.equal(c.snapshot().failure.mimeType, 'image/jpeg');
+  assert.equal(c.snapshot().failure.isArrayBuffer, false);
+  assert.equal(c.snapshot().photo, null);
+  assert.equal('data' in c.snapshot().failure, false);
+});
+
+test('retry clears diagnostics, and a late rejected capture cannot restore discarded errors', async () => {
+  let attempt = 0;
+  const c = createCaptureController({ cameraFactory: () => ({ takePhoto: async () => { if (++attempt === 1) throw new Error('temporary failure'); return image(); } }) });
+  assert.equal(await c.capture(), false);
+  assert.equal(await c.capture(), true);
+  assert.equal(c.snapshot().failure, null);
+  let reject;
+  const pendingController = createCaptureController({ cameraFactory: () => ({ takePhoto: () => new Promise((_, r) => { reject = r; }) }) });
+  const pending = pendingController.capture(); pendingController.discard();
+  reject(new Error('late failure')); await pending;
+  assert.equal(pendingController.snapshot().failure, null);
+  assert.equal(pendingController.snapshot().state, 'idle');
 });

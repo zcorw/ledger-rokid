@@ -5,30 +5,31 @@
 import wx from 'wx';
 import { createCaptureController } from '../../lib/capture.js';
 export default {
-  data: { message: '仅使用虚构测试收据。照片仅保留在内存中，不上传。', busy: false, selectedAction: 'capture', hostTarget: 'unknown', entryHint: '聊天卡片请双击进入全屏，再确认拍摄。全屏内上下选择，确认键执行。' },
+  data: { message: '仅使用虚构测试收据。照片仅保留在内存中，不上传。', busy: false, selectedAction: 'capture', entryHint: '上下选择拍摄、清除或虚构审核，确认键执行。' },
   onLoad() {
     this.controller = createCaptureController({
       cameraFactory: () => wx.media?.createCameraContext?.(),
-      notify: ({ state, busy, photo }) => {
-        const labels = { idle: '照片已清除，可以重新拍摄。', capturing: '等待相机拍摄；取消后需等待相机结束。', captured: `已收到照片 ${photo?.data.byteLength ?? 0} 字节。尚未验证清晰度，无识别和上传功能。`, unsupported: '当前运行环境不支持相机，请在目标设备以 _blank 启动。', failed: '拍摄失败或权限未获准，请检查相机授权后重试。' };
-        this.setData({ busy, message: labels[state] || '' });
+      notify: ({ state, busy, photo, failure }) => {
+        const labels = { idle: '照片已清除，可以重新拍摄。', capturing: '等待相机拍摄；取消后需等待相机结束。', captured: `已收到照片 ${photo?.data.byteLength ?? 0} 字节。尚未验证清晰度，无识别和上传功能。`, unsupported: '当前运行环境不支持相机，请检查设备、运行时和相机权限。', failed: '拍摄未成功。' };
+        let message = labels[state] || '';
+        if (failure) {
+          const stages = { camera: '创建相机', takePhoto: '拍摄接口', validate: '照片返回值校验' };
+          const detail = failure.stage === 'validate'
+            ? `结果=${failure.resultType}，data=${failure.dataType}，ArrayBuffer=${failure.isArrayBuffer}，字节=${failure.byteLength ?? '未知'}，MIME=${failure.mimeType}`
+            : [failure.name, failure.code, failure.message].filter(Boolean).join(' / ');
+          message += `\n阶段：${stages[failure.stage] || failure.stage}\n${detail}`;
+          console.warn('[capture]', JSON.stringify(failure));
+        }
+        this.setData({ busy, message });
       },
     });
   },
   onHide() { this.controller?.discard(); },
   onUnload() { this.controller?.close(); },
-  onTargetChanged(target) {
-    this.setData({
-      hostTarget: target,
-      entryHint: target === '_blank'
-        ? '全屏：上下选择拍摄、清除或虚构审核，确认键执行；返回键退出。'
-        : '聊天卡片请双击进入全屏后拍摄；卡片中不能使用相机。',
-    });
-    if (target !== '_blank') this.controller?.discard();
-  },
   onKeyUp(event) {
-    // Leave card activation, Backspace and voice wakeup to the host.
-    if (this.data.hostTarget !== '_blank' || event.repeat) return;
+    console.log('keyup')
+    // Leave Backspace and voice wakeup to the host.
+    if (event.repeat) return;
     if (event.code === 'ArrowUp' || event.code === 'ArrowDown') {
       event.preventDefault();
       const actions = ['capture', 'discard', 'reviewDemo'];
@@ -42,10 +43,6 @@ export default {
     }
   },
   capture() {
-    if (this.data.hostTarget === '_current') {
-      this.setData({ message: '请先双击进入全屏，再选择拍摄测试收据。' });
-      return false;
-    }
     return this.controller?.capture();
   },
   reviewDemo() {

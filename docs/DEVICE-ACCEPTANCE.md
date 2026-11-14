@@ -4,9 +4,11 @@ This is an AIUI source prototype, not an APK, deployable production app, OCR imp
 
 ## Runtime contract
 
-Official reference: https://github.com/yodaos-project/AIUI/blob/cf2908bf95359bfa76a04d0f6abde9313b6c92f1/documentation/3-api/media/media-capture.en-US.md
+Official reference: https://open.rokid.com/aiui/api/media/media-capture?lang=zh-CN&version=0.19.0
 
-The application must run in a supported native AIUI runtime with `_blank` lifetime and CAMERA permission. The documented wx camera factory may be unavailable on wasm32 or other unsupported runtimes. Declaring CAMERA does not grant consent. Capture only follows a visible button press, with system preview requested. High quality / telephoto are documented options, not measured framing guarantees.
+This test build does not gate camera calls by page target. AIUI documents media access after entering `_blank`, disables media capture for `app.config.lifetime === 'cut'`, and requires CAMERA permission. The documented wx camera factory may be unavailable on wasm32 or other unsupported runtimes. Declaring CAMERA does not grant consent. Capture only follows an explicit confirmation or button press, with system preview requested. High quality / telephoto are documented options, not measured framing guarantees.
+
+Encoded photos with image/jpeg, image/png or image/webp MIME types are accepted; the original bytes and MIME type are preserved.
 
 Native capture cancellation is not documented: clearing or hiding invalidates the result, but another native capture is blocked until the original promise settles. The controller holds at most one encoded photo in volatile memory. Clearing drops references; this is not guaranteed secure memory erasure. Camera context has no documented manual disposal method. No invented release API is called.
 
@@ -14,9 +16,9 @@ Native capture cancellation is not documented: clearing or hiding invalidates th
 
 Use Node.js 22 or newer: `npm run check && npm test`. No dependencies are needed. Tests cover successful capture, missing native API, permission failure, malformed response, cancellation, duplicate requests and teardown. The page script is syntax-checked but the actual Ink renderer and native module are not exercised. GitHub Actions repeats these checks. Passing Node CI is not hardware acceptance.
 
-## Required device acceptance (not yet executed)
+## Required device acceptance (full checklist pending)
 
-Record device model, firmware, AIUI version and launch mechanism. Load `aiui/` using the official supported development process for that target, with `_blank`; this repository does not guess a packaging command.
+Record device model, firmware, AIUI version and launch mechanism. Load `aiui/` using the official supported development process and test card and full-screen entry separately. Removing the page guard does not establish that either environment supports camera capture.
 
 1. Deny camera consent: no capture/upload; failure is visible and retry is possible.
 2. Grant consent and capture a synthetic receipt: system preview appears, encoded bytes arrive, and framing/readability are inspected using a separately reviewed local preview/OCR step. Current UI only displays byte count, not an image preview.
@@ -29,35 +31,41 @@ The Zhixu camera task stays in progress until native runtime and device checks p
 
 ## Capture entry and device navigation
 
-The previous page exposed tap buttons but did not explain that the conversation card
-and full-screen page are different interaction contexts. This is a confirmed guidance
-gap, not a confirmed diagnosis of a particular device failure.
+The capture and review pages no longer store or branch on `hostTarget`. This is
+a device experiment to determine whether the native camera can be invoked from
+the current card entry without first switching to a full-screen container.
 
-The official AIUI documentation at commit
-`cf2908bf95359bfa76a04d0f6abde9313b6c92f1` describes:
-- [Target](https://github.com/yodaos-project/AIUI/blob/cf2908bf95359bfa76a04d0f6abde9313b6c92f1/documentation/1-framework/open-agent-format/target.en-US.md):
-  double-tap the conversation card to enter the full-screen `_blank` container.
-- [Events](https://github.com/yodaos-project/AIUI/blob/cf2908bf95359bfa76a04d0f6abde9313b6c92f1/documentation/1-framework/open-agent-format/page-events.en-US.md):
-  page `onKeyUp` receives `Enter`, `ArrowUp`, and `ArrowDown`; use
-  `preventDefault()` when taking over the host's built-in action.
-- Camera access requires `_blank`; declaring CAMERA does not grant OS permission.
+Direction keys select an action and Enter executes it without requiring a target
+callback. Backspace, GlobalHook and voice wakeup are not intercepted. Repeated
+key events are ignored, review inputs retain native keyboard focus, and tap
+buttons remain available. Changing target alone no longer clears the photo;
+explicit clear/cancel, page hide and unload still invalidate image results.
+Native camera availability and permission checks remain in effect.
 
-The updated page shows entry instructions before the status text. Once the host
-reports `_blank`, direction keys switch between capture and clear/cancel, and
-Enter executes the displayed selection. Backspace, GlobalHook and voice wakeup
-are not intercepted. Repeated key events are ignored. Tap buttons remain available.
-A reported inline target blocks capture and returning to inline invalidates pending
-image results. If an older host never reports the target, key handling stays with
-the host and tap capture still relies on the native API's target/permission checks.
+User-reported glasses verification: the camera returned an ArrayBuffer of 965298
+bytes with MIME type image/webp. The original JPEG/PNG-only allowlist rejected
+that result. After adding WebP support, the user confirmed capture succeeds.
+Device model, firmware and AIUI version were not recorded in this report; the
+remaining permission, cancellation, image-quality and repeat-run checks above
+are still pending.
+
+Capture failures now show the failing stage (camera creation, native takePhoto,
+or returned-photo validation), plus the native error name/code/message when
+available. Invalid-photo diagnostics report only result/data types, byte length
+and MIME type. The same metadata is logged with the [capture] prefix; image
+bytes are not included. Clear/cancel and a new capture reset the diagnostics.
 
 Acceptance on the target glasses must check:
-1. Open the current draft; verify the entry hint is visible in the card.
-2. Double-tap into full-screen and verify the hint changes to full-screen controls.
-3. Move selection and confirm capture with a synthetic receipt, then clear it.
+1. Open the current draft in the card and verify the generic entry hint appears.
+2. Select capture and confirm once; record whether the system camera preview opens
+   or the page reports unsupported/failed capture.
+3. Repeat from a full-screen launch and compare results using a synthetic receipt.
 4. Verify one activation does not cause duplicate captures, and cancel while busy.
-5. Verify returning to the card discards the image; Backspace/voice still behave normally.
-6. Record the AIUI version and whether target/key callbacks actually arrive. If the
-   hint never changes, distinguish an old imported build from missing host callbacks.
+5. Verify hiding or exiting the page discards the image; Backspace/voice still
+   behave normally. Confirm that card navigation remains usable when the page
+   handles direction and confirmation keys.
+6. Record the AIUI version and actual key callbacks. Rebuild and sync the latest
+   resource package before comparing results.
 
 The Node page tests execute the actual exported callbacks with a mocked controller.
 They do not compile the Ink layout, emulate focus routing, grant camera permission,

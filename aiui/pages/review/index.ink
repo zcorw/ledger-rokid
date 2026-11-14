@@ -4,7 +4,7 @@
 <script setup>
 import { createReview, fields, syntheticReceipt } from '../../lib/review.js';
 export default {
-  data: { state: 'empty', value: '', label: '', position: '', errors: '', summary: '', maxLength: 500, hostTarget: 'unknown', selectedAction: 'next', actionLabel: '下一字段' },
+  data: { state: 'empty', value: '', label: '', position: '', errors: '', summary: '', maxLength: 500, selectedAction: 'next', actionLabel: '下一字段' },
   onLoad() { this.review = createReview(); this.start(); },
   start() { this.review.load(syntheticReceipt); this.render(); },
   actions() {
@@ -12,10 +12,9 @@ export default {
     if (this.review.snapshot().state === 'review') return [['back', '返回修改'], ['confirm', '确认本地内容（不提交）'], ['cancel', '取消并清除']];
     return [['start', '重新加载虚构数据'], ['cancel', '取消并清除']];
   },
-  onTargetChanged(target) { this.setData({ hostTarget: target }); },
   onKeyUp(event) {
-    // Preserve native text input focus and all host navigation outside full-screen.
-    if (this.data.hostTarget !== '_blank' || event.repeat || this.inputFocused) return;
+    // Preserve native text input focus and leave host navigation keys alone.
+    if (event.repeat || this.inputFocused) return;
     const actions = this.actions();
     if (event.code === 'ArrowUp' || event.code === 'ArrowDown') {
       event.preventDefault();
@@ -43,12 +42,12 @@ export default {
   back() { this.review.back(); this.render(); },
   confirm() { this.review.confirm(); this.render(); },
   cancel() { this.review.cancel(); this.render(); },
-  onHide() { this.inputFocused = false; this.setData({ hostTarget: 'unknown' }); this.cancel(); },
+  onHide() { this.inputFocused = false; this.cancel(); },
   onUnload() { this.review?.cancel(); },
 };
 </script>
 <page><scroll-view class="screen" scroll-y="true">
-<text>全屏：上下选择操作，确认键执行；输入框获得焦点时使用原生输入。</text><text>当前操作：{{actionLabel}}</text>
+<text>上下选择操作，确认键执行；输入框获得焦点时使用原生输入。</text><text>当前操作：{{actionLabel}}</text>
 <text class="title">虚构数据演示 · 不提交</text>
 <view ink:if="{{state === 'editing'}}"><text>{{position}} {{label}}</text><input value="{{value}}" maxLength="{{maxLength}}" bindinput="input" bindfocus="focusInput" bindblur="blurInput"/><button bindtap="previous">上一字段</button><button bindtap="next">下一字段</button><text>{{errors}}</text><button bindtap="preview">预览全部字段</button></view>
 <view ink:if="{{state === 'review'}}"><text>{{summary}}</text><button bindtap="back">返回修改</button><button bindtap="confirm">确认本地内容（不提交）</button></view>

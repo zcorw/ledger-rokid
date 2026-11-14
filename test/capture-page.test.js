@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
+import { createCaptureController } from '../aiui/lib/capture.js';
 
 // Exercise the actual page callbacks without pretending to compile AIUI or use hardware.
 const source = await readFile(new URL('../aiui/pages/capture/index.ink', import.meta.url), 'utf8');
@@ -17,18 +18,14 @@ function page() {
 function key(code, repeat = false) {
   return { code, repeat, prevented: false, preventDefault() { this.prevented = true; } };
 }
-test('inline card preserves host activation and never invokes capture', () => {
+test('confirm invokes capture without a target callback', () => {
   const { p, counts } = page();
-  p.onTargetChanged('_current');
   const event = key('Enter'); p.onKeyUp(event);
-  assert.equal(event.prevented, false);
-  assert.equal(p.capture(), false);
-  assert.equal(counts().captures, 0);
-  assert.match(p.data.message, /全屏/);
+  assert.equal(event.prevented, true);
+  assert.equal(counts().captures, 1);
 });
-test('full-screen confirm captures once; repeat and unrelated keys do not capture', () => {
+test('confirm captures once; repeat and unrelated keys do not capture', () => {
   const { p, counts } = page();
-  p.onTargetChanged('_blank');
   const event = key('Enter'); p.onKeyUp(event);
   assert.equal(event.prevented, true);
   p.onKeyUp(key('Enter', true));
@@ -37,9 +34,8 @@ test('full-screen confirm captures once; repeat and unrelated keys do not captur
   }
   assert.equal(counts().captures, 1);
 });
-test('direction changes selection, confirm clears, return to card discards image', () => {
+test('direction changes selection, confirm clears, hiding discards image', () => {
   const { p, counts } = page();
-  p.onTargetChanged('_blank');
   const down = key('ArrowDown'); p.onKeyUp(down);
   assert.equal(down.prevented, true);
   assert.equal(p.data.selectedAction, 'discard');
@@ -47,13 +43,40 @@ test('direction changes selection, confirm clears, return to card discards image
   assert.deepEqual(counts(), { captures: 0, discards: 1 });
   p.onKeyUp(key('ArrowUp'));
   assert.equal(p.data.selectedAction, 'capture');
-  p.onTargetChanged('_current');
+  p.onHide();
   assert.equal(counts().discards, 2);
 });
-test('unknown target does not intercept host navigation and tap still uses native guard', () => {
+test('tap invokes capture without a target callback', () => {
   const { p, counts } = page();
-  const e = key('Enter'); p.onKeyUp(e);
-  assert.equal(e.prevented, false);
-  assert.equal(counts().captures, 0);
   assert.equal(p.capture(), true);
+  assert.equal(counts().captures, 1);
+});
+
+test('page shows native error details and separates invalid returned photos from capture errors', async () => {
+  const makePage = new Function('wx', 'createCaptureController', script.replace('export default', 'return'));
+  for (const [takePhoto, expected] of [
+    [async () => { throw { code: 'CAMERA_BUSY', message: 'Camera is busy' }; }, ['拍摄接口', 'CAMERA_BUSY', 'Camera is busy']],
+    [async () => ({ data: new Uint8Array(10), mimeType: 'image/jpeg' }), ['照片返回值校验', 'Uint8Array', '字节=10', 'MIME=image/jpeg']],
+  ]) {
+    const p = makePage({ media: { createCameraContext: () => ({ takePhoto }) } }, createCaptureController);
+    p.setData = function(value) { Object.assign(this.data, value); };
+    p.onLoad(); assert.equal(await p.capture(), false);
+    for (const fragment of expected) assert.ok(p.data.message.includes(fragment), p.data.message);
+    assert.equal(p.data.busy, false);
+    assert.equal(p.data.message.includes('权限未获准'), false);
+    p.discard(); assert.equal(p.controller.snapshot().failure, null);
+  }
+});
+
+test('page accepts the WebP result reported by the glasses and shows capture success', async () => {
+  const result = { data: new ArrayBuffer(965298), mimeType: 'image/webp' };
+  const makePage = new Function('wx', 'createCaptureController', script.replace('export default', 'return'));
+  const p = makePage({ media: { createCameraContext: () => ({ takePhoto: async () => result }) } }, createCaptureController);
+  p.setData = function(value) { Object.assign(this.data, value); };
+  p.onLoad();
+  assert.equal(await p.capture(), true);
+  assert.ok(p.data.message.includes('已收到照片 965298 字节'), p.data.message);
+  assert.equal(p.data.busy, false);
+  assert.equal(p.controller.snapshot().photo.mimeType, 'image/webp');
+  assert.equal(p.controller.snapshot().failure, null);
 });

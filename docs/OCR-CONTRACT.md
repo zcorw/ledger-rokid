@@ -1,9 +1,10 @@
-# Receipt candidate boundary (not a connected OCR feature)
+# Receipt recognition contract
 
-`aiui/lib/receipt-candidate.js` is an isolated, pure adapter. No page imports it yet.
+`aiui/lib/receipt-candidate.js` is a pure adapter used by the native agent's
+real recognition controller and the independent browser chain.
 It accepts an HTTP status and an already decoded **Flow Ledger** candidate body.
 It does not call OpenAI, upload photographs, store data, choose an account, submit
-expenses, or change the existing camera/review prototype.
+expenses, or implement an authenticated backend connection.
 
 ## Verified source contract
 
@@ -23,17 +24,35 @@ currencies. Nothing in this module determines OCR confidence or correctness.
 
 Malformed shape/types, missing or extra fields and oversized fields fail closed.
 HTTP failures never become candidates and their raw bodies are not reflected.
-Warnings are copied as untrusted plain text, never instructions or HTML. A future
-transport must bound response bytes before JSON parsing and handle network errors.
+Warnings are copied as untrusted plain text, never instructions or HTML. The HTTPS transport must bound response bytes before JSON parsing and handle network errors.
 This adapter is not a provider-response parser or a retry mechanism.
 
-## Remaining blockers
+## Connected device transport
 
-Device-scoped Flow Ledger authentication and authorized transport are not yet
-implemented. Do not embed web cookies, account passwords or provider API keys.
-No production credentials, photos, paid OCR calls or real financial writes were
-used. Camera-to-OCR wiring, lifecycle cancellation, native rendering and hardware
-acceptance remain separate. The existing review page still uses synthetic data.
+The agent uses HTTPS /api/v1/receipt-devices with phone-approved, receipt-only
+device grants. POST /pairings starts authorization, POST /pairings/token polls,
+and POST /receipt-recognition accepts a bearer grant plus X-Receipt-Upload: 1.
+See the Flow Ledger 2 docs/receipt-devices.md for owner approval and revocation.
+Pairings last 10 minutes. New grants return expiresAt: null and remain valid
+until revocation/password change. Finite grants from older deployments keep
+their original expiry. Native credentials are scoped to backend origin/API,
+persisted with wx storage and restored after Agent/device restart. Closing the
+client never deletes saved authorization. A 401/403 response removes it; network
+errors retain it. Corrupt, wrong-resource and expired records are not uploaded.
+Storage failures are shown explicitly; no silent memory-only fallback is used.
+The adapter uses the [official AIUI Agent-isolated storage APIs](https://github.com/yodaos-project/AIUI/blob/c490609a5018152aef52ebcee912e4534e4f4bca/documentation/3-api/storage-api.md).
+The normal web cookie is neither copied nor sent by the glasses.
+
+JPEG/PNG originals up to 8 MiB pass through. Original WebP is converted via
+Blob/createImageBitmap/offscreen Canvas.convertToBlob to JPEG (PNG fallback is
+accepted), with white transparency and longest side <=4096. Never upload the
+400x180 photo-display canvas. Responses are streamed with a 16 KiB bound before
+JSON parsing. Requests time out after 15 seconds (55 for OCR); hiding/exiting
+aborts polling and upload. No mock fallback, provider key or photo persistence
+is present. Warnings are not rendered as bill content; missing fields stay blank.
+
+Both backend/frontend deployment and target-device acceptance remain required.
+Local tests use synthetic responses, no paid OCR or real financial writes.
 
 Run `npm run check` and `npm test`. Contract fixtures are synthetic; tests do not
 establish remote OCR quality, image readability, deployment or device acceptance.

@@ -1,15 +1,14 @@
 {
   "name": "知产 Rokid",
-  "description": "Local-only receipt capture capability prototype",
+  "description": "Receipt viewfinder and bill preview prototype",
   "pages": [
-    "pages/capture/index",
-    "pages/review/index"
+    "pages/capture/index"
   ],
   "permissions": [
     "CAMERA"
   ],
   "window": {
-    "navigationBarTitleText": "知产拍摄测试",
+    "navigationBarTitleText": "账单拍摄",
     "navigationBarBackgroundColor": "#000000",
     "viewport": {
       "width": "device-width"

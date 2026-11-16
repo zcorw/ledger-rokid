@@ -29,4 +29,4 @@ export function createReview() {
     cancel() { clear(); state = 'cancelled'; },
   };
 }
-export const syntheticReceipt = { expenseDate: '2026-11-13', amount: '1234', currencyCode: 'JPY', merchant: '虚构测试商店', category: 'food', note: '仅演示，未识别照片' };
+export const syntheticReceipt = { expenseDate: '2026-11-13', amount: '1234', currencyCode: 'JPY', merchant: '虚构测试商店', category: 'food', note: '' };

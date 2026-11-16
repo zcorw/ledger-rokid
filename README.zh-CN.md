@@ -1,0 +1,22 @@
+# 知产 Rokid
+
+[English](README.md) | **简体中文**
+
+Rokid AIUI 收据拍摄与识别智能体，配合 Flow Ledger 2 使用。
+
+- 打开智能体即显示实时取景，下方提示“单击拍照，自动识别账单”。
+- 单击后先释放预览相机，再拍摄并自动识别；识别期间显示照片。
+- 首次使用需在手机登录[知产设备授权页](https://ledger.zcorw.xyz/receipt-devices)，输入眼镜上的授权码并确认。授权仅用于收据识别，长期有效，直到撤销或修改账号密码。凭证保存在按 Agent 隔离的本地存储中，退出或重启眼镜后自动恢复；清除 Agent 数据后需重新授权。
+- 原始 WebP 照片转换为 JPEG，经 HTTPS 上传，后端调用已配置的识别服务。识别成功后展示经校验的实际账单内容，突出金额和货币符号，不自动保存开销。
+- 取消、隐藏或退出会停止预览、清除照片并取消网络请求。识别失败可重试同一照片或重新拍摄。
+- 语音修改账单值保留为待办，暂未实现，也不申请麦克风权限。
+
+两端代码需配套部署。Flow Ledger 2 必须先迁移到 `0012_persistent_devices` 并部署设备授权页面/API；设置 `APP_BASE_URL=https://ledger.zcorw.xyz`，并配置后端识别服务。眼镜无法使用仅支持网页登录的旧版后端。详见[智能体流程](docs/AGENT-FLOW.md)、[接口约定](docs/OCR-CONTRACT.md)和[设备验收](docs/DEVICE-ACCEPTANCE.md)。
+
+## 本地检查
+
+使用 Node.js 22 或更新版本：`npm run check`、`npm test`。通过 `npm ci --ignore-scripts` 安装开发依赖。测试使用合成照片和返回值，不联系生产识别服务；需在支持的原生 AIUI 运行时编译、同步资源包并验收。
+
+## 独立浏览器演示
+
+[账单编辑演示](docs/REVIEW-PROTOTYPE.md)保留逐字段编辑及显式确认；`/preview/chain.html` 提供拍摄、识别、编辑、提交的完整合成流程。它们不属于原生智能体注册页面，不调用相机或实际后端。浏览器只保存合成操作的恢复数据，详见[演示范围](docs/SYNTHETIC-CHAIN.md)。CI 的 Chromium 检查不能替代眼镜验收。

@@ -18,6 +18,8 @@ try {
         .replace(/{{selectedAction === '[^']+' \? 'selected' : ''}}/g, '')
         .replace(/{{bill\.([A-Za-z]+)}}/g, (_, key) => escape(bill[key]))
         .replace(/{{reviewMessage}}/g, '')
+        .replace(/{{writeAuthorizationUrl}}/g, '')
+        .replace(/{{submissionState[^}]+}}/g, '确认')
         .replace(/<(\/?)(?:view|scroll-view)\b/g, '<$1div').replace(/<(\/?)(?:text)\b/g, '<$1span');
       await page.setContent(`<style>html,body{margin:0;width:100%;height:100%}*{box-sizing:border-box}button{color:inherit;background:#000}${styles}</style>${html}`);
       for (const label of ['商户', '金额', '时间', '账户', '分类']) assert.equal(await page.locator('.field-label').filter({ hasText: label }).count(), 1);

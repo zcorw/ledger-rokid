@@ -5,6 +5,11 @@ export const newRequestKey = () => globalThis.crypto?.randomUUID?.() || 'xxxxxxx
 export function createDraftSaver({ save, load, notify = () => {}, makeKey = newRequestKey } = {}) {
   let receipt = '', revision = 0, fingerprint = '', key = '', busy = false, run = 0, abort = null;
   return {
+    adopt(draft) {
+      if (busy || !draft?.saved || !Number.isSafeInteger(draft.revision) || draft.revision < 1 || !draft.values) return false;
+      receipt = draft.receiptId; revision = draft.revision; fingerprint = JSON.stringify(draft.values); key = draft.requestKey;
+      return true;
+    },
     async run(receiptId, values) {
       if (busy) return false;
       if (!/^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i.test(receiptId || '')) {

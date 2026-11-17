@@ -135,6 +135,28 @@ export function createReceiptApi({ fetchImpl = (...args) => globalThis.fetch(...
   }
 
   return {
+    async capabilities({ signal } = {}) {
+      const token = await authorized(signal); active(signal);
+      const response = await request('/capabilities', { signal, headers: { Authorization: 'Bearer ' + token } });
+      if (response.status === 401) { forget(); throw error('AUTH_REQUIRED'); }
+      if (response.status !== 200 || typeof response.body.canCreateExpenses !== 'boolean') throw error('INVALID_RESULT');
+      const uri = new URL(response.body.authorizationUri);
+      if (uri.origin !== origin.origin || uri.username || uri.password || uri.hash || uri.pathname !== '/receipt-devices' || uri.search !== '?device=' + response.body.deviceId || !/^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i.test(response.body.deviceId || '')) throw error('INVALID_RESULT');
+      return response.body;
+    },
+    async confirmReceipt(payload, { signal } = {}) {
+      const token = await authorized(signal); active(signal);
+      const response = await request('/receipt-confirmations', { ...json(payload, signal), headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token } });
+      if (response.status === 401) { forget(); throw error('AUTH_REQUIRED'); }
+      return response;
+    },
+    async getConfirmation(requestKey, receiptId, { signal } = {}) {
+      const token = await authorized(signal); active(signal);
+      const response = await request('/receipt-confirmations/' + encodeURIComponent(requestKey) + '?receiptId=' + encodeURIComponent(receiptId), { signal, headers: { Authorization: 'Bearer ' + token } });
+      if (response.status === 401) { forget(); throw error('AUTH_REQUIRED'); }
+      if (response.status !== 200) throw error(response.body?.error?.code || 'CONFIRMATION_UNKNOWN');
+      return response.body;
+    },
     async saveDraft(payload, { signal } = {}) {
       const token = await authorized(signal); active(signal);
       const response = await request('/receipt-drafts', { ...json(payload, signal), headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token } });

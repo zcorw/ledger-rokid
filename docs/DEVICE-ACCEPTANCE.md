@@ -1,5 +1,7 @@
 # Camera and agent flow acceptance
 
+The owner confirmed the previous package's developed functions on 2026-11-17. Historical results/checklists below retain their original scope. The new review/voice/draft/confirmation increment has separate [target-device checks](REVIEW-WORKFLOW.md), which are not completed by the previous confirmation or by local automated tests.
+
 ## Reported device results
 
 The glasses returned an ArrayBuffer of 965298 bytes with MIME type image/webp.

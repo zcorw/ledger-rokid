@@ -1,5 +1,7 @@
 # Agent flow
 
+The baseline below describes the previously accepted capture/recognition package. The development branch now adds the fixed review page, Voice edit, Draft and separately authorized Confirm actions; use [the current workflow](REVIEW-WORKFLOW.md) for the new behavior and its pending device acceptance.
+
 ## Current flow
 
 1. Opening the agent goes directly to the capture page and checks its saved

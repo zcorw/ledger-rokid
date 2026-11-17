@@ -6,14 +6,17 @@ import wx from 'wx';
 import { createViewfinderController } from '../../lib/viewfinder.js';
 import { createPhotoDisplayController } from '../../lib/photo-display.js';
 import { createReceiptRecognitionController } from '../../lib/receipt-recognition.js';
-import { createReceiptApi } from '../../lib/receipt-api.js';
+import { createReceiptApi, receiptApiConfig } from '../../lib/receipt-api.js';
 import { createReceiptCredentialStore } from '../../lib/receipt-credential-store.js';
 import { presentBill } from '../../lib/bill-presentation.js';
 import { createVoiceReview } from '../../lib/voice-review.js';
 import { createDraftSaver } from '../../lib/receipt-draft.js';
+import { createNativeConfirmation } from '../../lib/native-confirmation.js';
 export default {
   data: { busy: false, bindingState: 'checking', captureState: 'idle', recognitionState: 'idle', previewItems: [], photoVisible: false, photoMessage: '', billVisible: false, bill: {}, receiptId: '', selectedAction: 'voice', reviewBusy: false, reviewMessage: '', authorizationVisible: false, authorizationCode: '', authorizationUrl: '', message: '正在检查绑定…', canRetry: false, entryHint: '单击拍照，自动识别账单' },
   onLoad() {
+    this.setData({ submissionState: 'idle', submissionPending: false, writeAuthorizationUrl: '' });
+    this.recoveryChecked = false; this.recoveryPending = false;
     this.pageHidden = false; this.pageClosed = false; this.pageReady = false;
     this.wantsPreview = false; this.previewStarting = false; this.captureActionBusy = false; this.captureRun = 0;
     this.bindingReady = false; this.bindingRun = 0; this.bindingAbort = null;
@@ -63,7 +66,11 @@ export default {
       recognize: (photo, options) => this.receiptApi.recognize(photo, options),
       notify: ({ state, busy, result, error }) => {
         if (this.pageClosed) return;
-        if (result) this.reviewValues = { ...result.values, accountId: '', accountName: '' };
+        if (result) {
+          this.reviewValues = { ...result.values, accountId: '', accountName: '' };
+          if (!this.submission?.hasPending()) this.submission?.reset();
+          this.setData({ submissionState: 'idle', submissionPending: false, selectedAction: 'voice', reviewMessage: '', writeAuthorizationUrl: '' });
+        }
         const messages = { AUTH_STORAGE_UNAVAILABLE: '当前运行时不支持保存设备授权，请升级运行时', AUTH_STORAGE_FAILED: '设备授权存储失败，请重试', RECEIPT_ARCHIVE_FAILED: '原图保存失败，请重试', AUTH_REQUIRED: '设备授权已失效，请重试并在手机授权', DEVICE_ACCESS_DENIED: '已拒绝授权，可重试重新申请', DEVICE_CODE_EXPIRED: '授权码已过期，请重试', DEVICE_CODE_USED: '授权码已使用，请重试', DEVICE_RATE_LIMIT: '授权请求过于频繁，请稍后重试', DEVICE_ENDPOINT_UNAVAILABLE: '后端尚未部署设备授权接口', RATE_LIMITED: '识别请求过于频繁，请稍后重试', TIMEOUT: '识别超时，请重试', INVALID_RESULT: '识别结果无效，请重试', NETWORK_ERROR: '连接失败，请检查网络后重试', BACKEND_UNAVAILABLE: '识别服务暂不可用，请稍后重试', BACKEND_NOT_CONFIGURED: '后端尚未配置识别服务', BACKEND_REDIRECT: '后端地址发生跳转，请检查 HTTPS 配置', BACKEND_CONFIG: '后端 HTTPS 地址配置无效', RUNTIME_UNSUPPORTED: '当前运行时不支持识别网络接口', IMAGE_TOO_LARGE: '照片过大，请重新拍摄', IMAGE_ENCODING_UNSUPPORTED: '当前运行时不支持照片格式转换', IMAGE_ENCODING_FAILED: '照片转换失败，请重新拍摄', RECEIPT_NOT_FOUND: '未识别到账单，请重新拍摄', RECOGNITION_FAILED: '识别失败，请重试' };
         this.setData({ recognitionState: state, ...(!busy ? { authorizationVisible: false, authorizationCode: '', authorizationUrl: '' } : {}), billVisible: state === 'recognized', receiptId: result?.receiptId || '', bill: result ? presentBill(result.values) : {}, busy: busy || !!this.controller?.snapshot().busy || this.captureActionBusy, canRetry: state === 'failed', ...(state === 'recognizing' ? { message: '正在识别账单…' } : state === 'failed' ? { message: messages[error] || messages.RECOGNITION_FAILED } : state === 'recognized' ? { message: '' } : {}) });
       },
@@ -100,11 +107,41 @@ export default {
       },
     });
   },
+  setupSubmission() {
+    if (this.submission) return;
+    const store = createReceiptCredentialStore({ wx });
+    const resource = receiptApiConfig.baseUrl + receiptApiConfig.prefix;
+    this.submission = createNativeConfirmation({ api: this.receiptApi, resource,
+      saveDraft: (id, values) => this.drafts.run(id, values),
+      restoreDraft: draft => this.drafts.adopt(draft),
+      store: { get: () => store.read(resource + ':confirmation'), set: value => store.write(resource + ':confirmation', value), remove: () => store.remove(resource + ':confirmation') },
+      notify: ({ state, busy, pending, values, receiptId, error, authorizationUri }) => {
+        if (this.pageHidden || this.pageClosed) return;
+        const messages = { REVIEW_INCOMPLETE: '请先用语音补全金额、时间、币种、账户和分类', EXPENSE_PERMISSION_REQUIRED: '请在手机允许本设备确认入账，再按确认', POSSIBLE_DUPLICATE: '可能已有相同开销；请核对，仍需入账请再次按确认', EXPENSE_ALREADY_DELETED: '此单据的开销已删除，不会重新入账', IDEMPOTENCY_CONFLICT: '请求与已有记录冲突，请在知产核对', DRAFT_VERSION_CONFLICT: '草稿已有更新，请在知产网站核对', AUTH_REQUIRED: '设备授权已失效，请返回重新绑定', AUTH_STORAGE_FAILED: '恢复状态保存失败，请先保存草稿', AUTH_STORAGE_UNAVAILABLE: '当前环境不支持保存恢复状态，请在网站入账', CURRENCY_NOT_ENABLED: '请先在知产启用该币种', DRAFT_FAILED: '草稿未保存成功，尚未入账，请重试' };
+        const message = state === 'succeeded' ? '已入账，可在知产查看原图及开销' : state === 'checking' ? '正在查询上次入账结果…' : state === 'checking_permission' ? '正在核对入账权限…' : state === 'preparing' ? '正在保存待确认单据…' : state === 'submitting' ? '正在确认入账…' : messages[error] || '入账结果尚未确认，请按确认查询；不会重复创建';
+        if (values) this.reviewValues = { ...values };
+        if (pending || values || state === 'succeeded') this.wantsPreview = false;
+        this.setData({ submissionState: state, submissionPending: pending, reviewBusy: busy, reviewMessage: message,
+          writeAuthorizationUrl: authorizationUri || '', ...(receiptId ? { receiptId } : {}),
+          ...((pending || values || state === 'succeeded') ? { billVisible: true, bill: presentBill(this.reviewValues || {}), selectedAction: 'confirm' } : {}) });
+      },
+    });
+  },
+  async openAfterRecovery() {
+    this.setupSubmission();
+    if (!this.recoveryChecked) {
+      this.recoveryChecked = true; this.recoveryPending = true;
+      let restored;
+      try { restored = await this.submission.recover(); } finally { this.recoveryPending = false; }
+      if (restored || !this.allowCameraAction()) return false;
+    }
+    return this.maybeOpenPreview();
+  },
   onShow() {
     this.pageHidden = false; this.wantsPreview = true;
-    if (this.pageReady) return this.maybeOpenPreview();
+    if (this.pageReady) return this.openAfterRecovery();
   },
-  onReady() { this.pageReady = true; this.wantsPreview = true; return this.maybeOpenPreview(); },
+  onReady() { this.pageReady = true; this.wantsPreview = true; return this.openAfterRecovery(); },
   bindingError(code) {
     const messages = { AUTH_STORAGE_UNAVAILABLE: '当前运行时不支持保存设备绑定，请升级运行时', AUTH_STORAGE_FAILED: '设备绑定存储失败，请重试', DEVICE_ACCESS_DENIED: '已拒绝绑定，请重新绑定', DEVICE_CODE_EXPIRED: '绑定码已过期，请重新绑定', DEVICE_CODE_USED: '绑定码已使用，请重新绑定', DEVICE_RATE_LIMIT: '绑定请求过于频繁，请稍后重试', DEVICE_ENDPOINT_UNAVAILABLE: '后端尚未部署设备绑定接口', TIMEOUT: '绑定请求超时，请重试', NETWORK_ERROR: '连接失败，请检查网络后重试', BACKEND_UNAVAILABLE: '绑定服务暂不可用，请稍后重试', INVALID_RESULT: '绑定返回结果无效，请重试' };
     return messages[code] || '设备绑定未完成，请重试';
@@ -132,6 +169,7 @@ export default {
     this.bindingAbort?.abort(); this.bindingAbort = null;
   },
   maybeOpenPreview() {
+    if (this.recoveryPending || !this.recoveryChecked || this.submission?.hasPending()) return false;
     if (!this.pageReady || this.pageHidden || this.pageClosed || !this.wantsPreview || this.previewStarting || this.captureActionBusy) return false;
     if (!this.bindingReady) return this.ensureBinding();
     const current = this.controller?.snapshot();
@@ -165,12 +203,14 @@ export default {
   },
   allowCameraAction() { return !this.pageClosed && !this.pageHidden; },
   onHide() {
+    this.submission?.cancel(); this.recoveryChecked = false;
     this.drafts?.cancel();
     this.voice?.cancel(); this.setData({ reviewBusy: false });
     this.pageHidden = true; this.wantsPreview = false; this.pendingKeyAction = null; this.lastCaptureInput = null; this.captureRun++; this.captureActionBusy = false;
     this.cancelBinding(); this.recognition?.cancel(); this.controller?.discard('hidden'); this.photoDisplay?.clear();
   },
   onUnload() {
+    this.submission?.cancel();
     this.drafts?.cancel();
     this.voice?.close();
     this.pageHidden = true; this.pageClosed = true; this.wantsPreview = false; this.pendingKeyAction = null; this.lastCaptureInput = null; this.captureRun++; this.captureActionBusy = false;
@@ -194,8 +234,9 @@ export default {
     if (this.data.billVisible && ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(event.code)) {
       event.preventDefault();
       if (!this.data.reviewBusy) {
-        const actions = ['voice', 'draft', 'confirm'], index = actions.indexOf(this.data.selectedAction);
-        this.setData({ selectedAction: actions[(index + (['ArrowLeft', 'ArrowUp'].includes(event.code) ? 2 : 1)) % 3] });
+        const actions = this.data.submissionPending || ['succeeded', 'conflict'].includes(this.data.submissionState) ? ['confirm'] : ['voice', 'draft', 'confirm'];
+        const index = Math.max(0, actions.indexOf(this.data.selectedAction));
+        this.setData({ selectedAction: actions[(index + (['ArrowLeft', 'ArrowUp'].includes(event.code) ? actions.length - 1 : 1)) % actions.length] });
       }
       return;
     }
@@ -218,8 +259,18 @@ export default {
   },
   activateReview(action, event) {
     event?.preventDefault?.(); event?.stopPropagation?.();
-    if (!this.allowCameraAction() || !this.data.billVisible || this.data.reviewBusy || !['voice', 'draft', 'confirm'].includes(action)) return false;
+    if (!this.allowCameraAction() || !this.data.billVisible || this.data.reviewBusy || this.submission?.isBusy() || !['voice', 'draft', 'confirm'].includes(action)) return false;
     if (!this.acceptCaptureInput(event, 'review-' + action)) return false;
+    if (action === 'confirm') {
+      this.setData({ selectedAction: action, writeAuthorizationUrl: '' });
+      if (['succeeded', 'conflict'].includes(this.data.submissionState)) {
+        if (!this.submission.reset()) return false;
+        this.setData({ submissionState: 'idle', submissionPending: false, reviewMessage: '' });
+        return this.retake();
+      }
+      return this.submission.confirm(this.data.receiptId, this.reviewValues || {});
+    }
+    if (this.submission?.hasPending() || this.data.submissionState === 'succeeded') return false;
     if (action === 'voice') {
       this.setData({ selectedAction: action });
       return this.voice.run(this.reviewValues || {});
@@ -228,7 +279,6 @@ export default {
       this.setData({ selectedAction: action });
       return this.drafts.run(this.data.receiptId, this.reviewValues || {});
     }
-    this.setData({ selectedAction: action, reviewMessage: '此操作将在后续步骤接通，当前账单已保留' });
     return false;
   },
   voiceEdit(event) { return this.activateReview('voice', event); },
@@ -278,11 +328,14 @@ export default {
     return photo ? this.runRecognition(photo) : this.openPreview(event);
   },
   retake() {
+    if (this.submission?.hasPending() || this.submission?.isBusy() || this.data.reviewBusy) return false;
     if (!this.allowCameraAction() || this.captureActionBusy || this.recognition.snapshot().busy) return false;
     this.discard('retake'); this.wantsPreview = true; return this.maybeOpenPreview();
   },
   capture(event) { return this.data.canRetry ? this.retry(event) : this.confirmCapture(event); },
   discard(reason = 'cancel') {
+    this.voice?.cancel(); this.drafts?.cancel(); this.submission?.cancel();
+    this.setData({ reviewBusy: false });
     this.wantsPreview = false; this.pendingKeyAction = null; this.lastCaptureInput = null; this.captureRun++; this.captureActionBusy = false;
     this.cancelBinding(); this.recognition?.cancel(); this.controller?.discard(reason); this.photoDisplay?.clear();
   },
@@ -300,7 +353,8 @@ export default {
   <view class="bill-category bill-field"><text class="field-label">分类</text><text class="field-value">{{bill.category}}</text></view>
 </view></scroll-view>
 <text class="review-message" ink:if="{{reviewMessage}}">{{reviewMessage}}</text>
-<view class="review-actions"><button class="{{selectedAction === 'voice' ? 'selected' : ''}}" bindtap="voiceEdit" disabled="{{reviewBusy}}">语音修改</button><button class="{{selectedAction === 'draft' ? 'selected' : ''}}" bindtap="saveDraft" disabled="{{reviewBusy}}">草稿</button><button class="{{selectedAction === 'confirm' ? 'selected' : ''}}" bindtap="submitBill" disabled="{{reviewBusy}}">确认</button></view>
+<text class="authorization-url" ink:if="{{writeAuthorizationUrl}}">{{writeAuthorizationUrl}}</text>
+<view class="review-actions"><button class="{{selectedAction === 'voice' ? 'selected' : ''}}" bindtap="voiceEdit" disabled="{{reviewBusy || submissionPending || submissionState === 'succeeded'}}">语音修改</button><button class="{{selectedAction === 'draft' ? 'selected' : ''}}" bindtap="saveDraft" disabled="{{reviewBusy || submissionPending || submissionState === 'succeeded'}}">草稿</button><button class="{{selectedAction === 'confirm' ? 'selected' : ''}}" bindtap="submitBill" disabled="{{reviewBusy}}">{{submissionState === 'succeeded' || submissionState === 'conflict' ? '继续拍摄' : '确认'}}</button></view>
 </view>
 <view class="{{billVisible ? 'screen screen-hidden' : 'screen'}}">
 <view class="authorization" ink:if="{{authorizationVisible}}"><text class="hint">请先绑定知产</text><text class="authorization-url">{{authorizationUrl}}</text><text class="authorization-code">{{authorizationCode}}</text><text class="hint">手机核对绑定码，允许识别并保存原图</text></view>

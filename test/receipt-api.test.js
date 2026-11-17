@@ -55,6 +55,20 @@ test('voice correction sends only the transcript and candidate through the authe
   assert.deepEqual(JSON.parse(call.body), { values, transcript: '金额改为614' });
   assert.equal(call.credentials, 'omit'); assert.equal(f.encoded.length, 0);
 });
+
+test('confirmation uses the existing grant, checks capabilities and queries an operation by key', async () => {
+  const id = '11111111-1111-4111-8111-111111111111';
+  const f = fixture({ fetch: async url => {
+    if (url.endsWith('/capabilities')) return json({ deviceId: id, canCreateExpenses: true, authorizationUri: origin + '/receipt-devices?device=' + id });
+    if (url.includes('/receipt-confirmations/')) return json({ status: 'not_found' });
+    if (url.endsWith('/receipt-confirmations')) return json({ status: 'recorded' }, 201);
+  } });
+  assert.equal((await f.api.capabilities()).canCreateExpenses, true);
+  assert.equal((await f.api.getConfirmation(id, id)).status, 'not_found');
+  assert.equal((await f.api.confirmReceipt({ receiptId: id, requestKey: id, revision: 1, confirmed: true })).status, 201);
+  assert.ok(f.calls.at(-2).url.endsWith('/' + id + '?receiptId=' + id));
+  assert.equal(f.calls.at(-1).headers.Authorization, 'Bearer ' + 's'.repeat(43));
+});
 test('entry binding restores a saved grant without a pairing request or phone code', async () => {
   const f = fixture({ store: memoryStore(saved()) });
   assert.equal(await f.api.authorize(), true); assert.equal(f.calls.length, 0); assert.deepEqual(f.states, []); assert.equal(f.encoded.length, 0);

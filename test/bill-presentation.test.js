@@ -30,3 +30,13 @@ test('unconfirmed receipt fields stay empty without placeholder amounts or inven
   for (const field of ['currencySymbol', 'merchant', 'expenseDate', 'category', 'note']) assert.equal(bill[field], '');
   assert.equal(presentBill({}).amountText, '');
 });
+
+test('review separates currencies sharing a symbol and preserves an unknown account', () => {
+  for (const currencyCode of ['JPY', 'CNY', 'USD', 'CAD']) {
+    const bill = presentBill({ amount: '614', currencyCode });
+    assert.equal(bill.currencyCode, currencyCode); assert.equal(bill.currencyNotice, '');
+    assert.equal(bill.account, '');
+  }
+  assert.equal(presentBill({ amount: '614' }).currencyNotice, '币种待确认');
+  assert.equal(presentBill({ accountName: '现金钱包' }).account, '现金钱包');
+});

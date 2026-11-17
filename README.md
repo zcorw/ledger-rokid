@@ -4,6 +4,8 @@
 
 A receipt capture and recognition agent for Rokid AIUI, paired with Flow Ledger 2.
 
+The current development branch adds a fixed review layout: merchant, amount, date, account and category remain visible even when their values are empty. Confirmed currency codes accompany symbols; an unknown currency is explicitly marked for review. Left/right or up/down selects Voice edit, Draft or Confirm. The action integrations are tracked separately in [TODO.md](TODO.md); the layout increment alone does not save drafts or expenses.
+
 - Opening the agent checks its saved binding first. An unbound device shows the phone binding URL and code before opening the camera. After approval, or with an existing saved binding, the live viewfinder opens automatically with the caption “单击拍照，自动识别账单”.
 - One activation releases the preview camera, captures a high-quality photo in `default` mode to preserve the full field of view, and starts recognition automatically. The frozen photo stays visible during recognition. Compare preview and photo framing on the glasses; matching framing is not yet verified.
 - First use requires signing in on the phone at the [device authorization page](https://ledger.zcorw.xyz/receipt-devices), entering the code shown on the glasses and explicitly approving it before capture. Receipt-only authorization remains valid until revoked or the account password changes. The credential is saved in Agent-isolated storage and restored after exit or device restart. Clearing Agent data requires authorization again.

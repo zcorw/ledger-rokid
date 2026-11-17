@@ -59,7 +59,19 @@ test('one explicit activation captures, recognizes and shows the bill without an
   assert.equal(r.p.data.bill.merchant, '测试商户'); assert.equal(r.p.data.bill.expenseDate, '2026-11-13'); assert.equal(r.p.data.bill.category, '');
   assert.equal(r.p.controller.snapshot().photo, null); assert.deepEqual(r.p.data.previewItems, []); assert.equal(r.p.data.photoVisible, false);
   assert.equal(await r.p.capture(), false); r.p.onKeyUp(key('Enter')); assert.equal(r.counts().shots, 1);
-  const direction = key('ArrowDown'); r.p.onKeyUp(direction); assert.equal(direction.prevented, false);
+  const direction = key('ArrowDown'); r.p.onKeyUp(direction); assert.equal(direction.prevented, true);
+  assert.equal(r.p.data.selectedAction, 'draft');
+});
+
+test('review keys move across actions without another shutter and duplicate events are ignored', async t => {
+  const r = page(); t.after(() => r.p.onUnload()); await r.p.onReady(); await r.p.capture();
+  assert.equal(r.p.data.selectedAction, 'voice');
+  r.p.onKeyUp(key('ArrowLeft')); assert.equal(r.p.data.selectedAction, 'confirm');
+  r.p.onKeyUp(key('ArrowRight', true)); assert.equal(r.p.data.selectedAction, 'confirm');
+  r.p.onKeyDown(key('Enter')); r.p.submitBill(); r.p.onKeyUp(key('Enter'));
+  assert.equal(r.counts().shots, 1); assert.equal(r.counts().recognitions, 1);
+  assert.equal(r.p.data.bill.amountText, '1,234.25');
+  r.p.onHide(); assert.equal(r.p.activateReview('draft'), false);
 });
 
 test('the native photo stays visible during recognition with its original bytes and MIME', async t => {

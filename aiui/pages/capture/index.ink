@@ -10,7 +10,7 @@ import { createReceiptApi } from '../../lib/receipt-api.js';
 import { createReceiptCredentialStore } from '../../lib/receipt-credential-store.js';
 import { presentBill } from '../../lib/bill-presentation.js';
 export default {
-  data: { busy: false, bindingState: 'checking', captureState: 'idle', recognitionState: 'idle', previewItems: [], photoVisible: false, photoMessage: '', billVisible: false, bill: {}, receiptId: '', authorizationVisible: false, authorizationCode: '', authorizationUrl: '', message: '正在检查绑定…', canRetry: false, entryHint: '单击拍照，自动识别账单' },
+  data: { busy: false, bindingState: 'checking', captureState: 'idle', recognitionState: 'idle', previewItems: [], photoVisible: false, photoMessage: '', billVisible: false, bill: {}, receiptId: '', selectedAction: 'voice', reviewBusy: false, reviewMessage: '', authorizationVisible: false, authorizationCode: '', authorizationUrl: '', message: '正在检查绑定…', canRetry: false, entryHint: '单击拍照，自动识别账单' },
   onLoad() {
     this.pageHidden = false; this.pageClosed = false; this.pageReady = false;
     this.wantsPreview = false; this.previewStarting = false; this.captureActionBusy = false; this.captureRun = 0;
@@ -145,6 +145,7 @@ export default {
     this.cancelBinding(); this.recognition?.close(); this.receiptApi?.close(); this.controller?.close('unload'); this.photoDisplay?.close();
   },
   keyboardAction() {
+    if (this.data.billVisible) return this.data.reviewBusy ? null : 'review-' + this.data.selectedAction;
     if (this.data.billVisible || this.captureActionBusy || this.recognition?.snapshot().busy) return null;
     if (this.data.canRetry) return 'retry';
     return this.controller?.snapshot().state === 'previewing' ? 'confirm-photo' : null;
@@ -158,6 +159,14 @@ export default {
   onKeyUp(event) {
     if (!this.allowCameraAction() || event.repeat) return;
     if (event.code === 'Backspace' || event.code === 'Escape') { this.discard('return'); return; }
+    if (this.data.billVisible && ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(event.code)) {
+      event.preventDefault();
+      if (!this.data.reviewBusy) {
+        const actions = ['voice', 'draft', 'confirm'], index = actions.indexOf(this.data.selectedAction);
+        this.setData({ selectedAction: actions[(index + (['ArrowLeft', 'ArrowUp'].includes(event.code) ? 2 : 1)) % 3] });
+      }
+      return;
+    }
     if (event.code !== 'Enter') return;
     let action = this.pendingKeyAction || this.keyboardAction();
     const previous = this.lastCaptureInput, elapsed = previous ? Date.now() - previous.time : -1;
@@ -166,6 +175,7 @@ export default {
     if (!action) return;
     event.preventDefault();
     if (action === 'ignore') return false;
+    if (action.startsWith('review-')) return this.activateReview(action.slice(7), event);
     return action === 'retry' ? this.retry(event) : action === 'open-preview' ? this.openPreview(event) : this.confirmCapture(event);
   },
   acceptCaptureInput(event, action) {
@@ -174,6 +184,16 @@ export default {
     if (previous && previous.action === action && previous.source !== source && !freshKey && time >= previous.time && time - previous.time < 750) return false;
     this.lastCaptureInput = { source, time, action, keySequence: this.keySequence }; return true;
   },
+  activateReview(action, event) {
+    event?.preventDefault?.(); event?.stopPropagation?.();
+    if (!this.allowCameraAction() || !this.data.billVisible || this.data.reviewBusy || !['voice', 'draft', 'confirm'].includes(action)) return false;
+    if (!this.acceptCaptureInput(event, 'review-' + action)) return false;
+    this.setData({ selectedAction: action, reviewMessage: '此操作将在后续步骤接通，当前账单已保留' });
+    return false;
+  },
+  voiceEdit(event) { return this.activateReview('voice', event); },
+  saveDraft(event) { return this.activateReview('draft', event); },
+  submitBill(event) { return this.activateReview('confirm', event); },
   openPreview(event) {
     if (!this.allowCameraAction() || this.captureActionBusy || this.recognition.snapshot().busy || this.controller.snapshot().busy) return Promise.resolve(false);
     if (!this.acceptCaptureInput(event, 'open-preview')) return Promise.resolve(false);
@@ -229,12 +249,19 @@ export default {
 };
 </script>
 <page>
-<scroll-view class="bill-screen" scroll-y="true" ink:if="{{billVisible}}"><view class="bill">
-  <view class="total"><text class="currency">{{bill.currencySymbol}}</text><text class="amount" style="font-size:{{bill.amountFontSize}}px">{{bill.amountText}}</text></view>
-  <text class="merchant" ink:if="{{bill.merchant}}">{{bill.merchant}}</text>
-  <view class="details"><text>{{bill.expenseDate}}</text><text>{{bill.category}}</text></view>
-  <text class="note" ink:if="{{bill.note}}">{{bill.note}}</text>
+<view class="bill-screen" ink:if="{{billVisible}}">
+<scroll-view class="bill-fields" scroll-y="true"><view class="bill">
+  <view class="bill-main">
+    <view class="bill-field"><text class="field-label">商户</text><text class="field-value">{{bill.merchant}}</text></view>
+    <view class="bill-field"><text class="field-label">金额</text><view class="total"><text class="currency">{{bill.currencySymbol}}</text><text class="amount" style="font-size:{{bill.amountFontSize}}px">{{bill.amountText}}</text><text class="currency-code" ink:if="{{bill.currencyCode}}">({{bill.currencyCode}})</text></view><text class="currency-notice" ink:if="{{bill.currencyNotice}}">{{bill.currencyNotice}}</text></view>
+    <view class="bill-field"><text class="field-label">时间</text><text class="field-value">{{bill.expenseDate}}</text></view>
+    <view class="bill-field"><text class="field-label">账户</text><text class="field-value">{{bill.account}}</text></view>
+  </view>
+  <view class="bill-category bill-field"><text class="field-label">分类</text><text class="field-value">{{bill.category}}</text></view>
 </view></scroll-view>
+<text class="review-message" ink:if="{{reviewMessage}}">{{reviewMessage}}</text>
+<view class="review-actions"><button class="{{selectedAction === 'voice' ? 'selected' : ''}}" bindtap="voiceEdit" disabled="{{reviewBusy}}">语音修改</button><button class="{{selectedAction === 'draft' ? 'selected' : ''}}" bindtap="saveDraft" disabled="{{reviewBusy}}">草稿</button><button class="{{selectedAction === 'confirm' ? 'selected' : ''}}" bindtap="submitBill" disabled="{{reviewBusy}}">确认</button></view>
+</view>
 <view class="{{billVisible ? 'screen screen-hidden' : 'screen'}}">
 <view class="authorization" ink:if="{{authorizationVisible}}"><text class="hint">请先绑定知产</text><text class="authorization-url">{{authorizationUrl}}</text><text class="authorization-code">{{authorizationCode}}</text><text class="hint">手机核对绑定码，允许识别并保存原图</text></view>
 <view class="preview-frame" ink:if="{{bindingState === 'bound' && !billVisible && !photoVisible && !authorizationVisible}}" bindtap="capture"><video ink:for="{{previewItems}}" ink:key="id" data-session="{{item.id}}" src="{{item.src}}" class="viewfinder" autoplay="true" muted="true" object-fit="contain" bindplaying="previewPlaying" binderror="previewError"></video></view>
@@ -256,8 +283,19 @@ export default {
 .authorization { display:flex; flex-direction:column; align-items:center; }
 .authorization-url { font-size:16px; text-align:center; margin-top:4px; overflow-wrap:anywhere; }
 .authorization-code { font-size:40px; font-weight:700; margin-top:8px; }
-.bill-screen { width:100%; height:100%; box-sizing:border-box; padding:16px; background-color:#000; color:#40ff5e; font-size:18px; }
-.bill { display:flex; flex-direction:column; gap:8px; margin-bottom:16px; }
+.bill-screen { width:100%; height:100%; box-sizing:border-box; padding:12px; background-color:#000; color:#40ff5e; font-size:18px; display:flex; flex-direction:column; }
+.bill-fields { flex:1; min-height:0; width:100%; overflow-y:auto; }
+.bill { display:flex; flex-direction:row; gap:16px; width:100%; }
+.bill-main { flex:3; min-width:0; }
+.bill-category { flex:1; min-width:0; }
+.bill-field { margin-bottom:8px; }
+.field-label { display:block; font-size:15px; opacity:0.8; }
+.field-value { display:block; min-height:22px; overflow-wrap:anywhere; white-space:pre-wrap; }
+.currency-code, .currency-notice { font-size:15px; }
+.review-actions { display:flex; flex-direction:row; gap:8px; flex-shrink:0; padding-top:8px; }
+.review-actions button { flex:1; min-width:0; font-size:16px; padding:8px 2px; border:1px solid #155c24; }
+.review-actions .selected { border:2px solid #40ff5e; }
+.review-message { flex-shrink:0; font-size:15px; max-height:42px; overflow:hidden; }
 .total { display:flex; flex-direction:row; flex-wrap:wrap; align-items:baseline; gap:4px; }
 .currency { font-size:28px; font-weight:600; }
 .amount { font-weight:700; line-height:1.08; max-width:100%; overflow-wrap:anywhere; }

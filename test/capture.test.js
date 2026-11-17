@@ -10,7 +10,7 @@ test('successful JPEG, PNG and WebP capture preserves bytes, MIME and documented
     const result = { data: new ArrayBuffer(10), mimeType };
     const c = createCaptureController({ cameraFactory: () => ({ takePhoto: async value => { options = value; return result; } }) });
     assert.equal(await c.capture(), true);
-    assert.deepEqual(options, { quality: 'high', mode: 'telephoto', enableSystemPreview: true });
+    assert.deepEqual(options, { quality: 'high', mode: 'default', enableSystemPreview: true });
     assert.equal(c.snapshot().state, 'captured');
     assert.equal(c.snapshot().photo.data, result.data);
     assert.equal(c.snapshot().photo.mimeType, mimeType);

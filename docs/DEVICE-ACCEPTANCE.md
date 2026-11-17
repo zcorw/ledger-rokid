@@ -91,8 +91,10 @@ an error and allows retry with the same photo, without an extra exposure.
    the actual returned bill with a large amount
    and currency symbol. Confirm amount, date, merchant and currency against the receipt.
 4. Repeat taps and key callbacks during exposure and recognition. Verify one
-   exposure and one recognition operation. Inspect native framing/readability
-   separately because preview and telephoto still framing may differ.
+   exposure and one recognition operation. Capture uses high-quality `default`
+   mode to preserve the full field of view. Compare all four preview/photo edges
+   and check that the complete receipt remains visible and readable; matching
+   framing still requires verification on the glasses.
 5. Exit/background during binding, permission acquisition, exposure and recognition. Return
    and verify a fresh preview with no stale image or bill. Camera privacy
    indicators must turn off on exit.

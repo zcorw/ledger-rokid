@@ -28,7 +28,7 @@ export function createCaptureController({ cameraFactory, notify = () => {} }) {
         const camera = cameraFactory();
         if (!camera || typeof camera.takePhoto !== 'function') throw new Error('unsupported');
         stage = 'takePhoto';
-        result = await camera.takePhoto({ quality: 'high', mode: 'telephoto', enableSystemPreview: true });
+        result = await camera.takePhoto({ quality: 'high', mode: 'default', enableSystemPreview: true });
         if (closed || current !== generation) return false;
         stage = 'validate';
         if (!(result?.data instanceof ArrayBuffer) || result.data.byteLength === 0 || !['image/jpeg', 'image/png', 'image/webp'].includes(result.mimeType)) {

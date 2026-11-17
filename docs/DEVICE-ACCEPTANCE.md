@@ -19,8 +19,10 @@ and real recognition/persistent authorization flow still needs target-device ver
 
 ## Current flow
 
-Opening the agent goes directly to the capture page. After its first frame is
-ready, a live viewfinder opens automatically. The only normal caption below it
+Opening the agent goes directly to the capture page and checks its saved binding.
+An unbound device shows the phone binding URL and code before requesting the
+camera. After approval, or when a saved binding exists, a live viewfinder opens
+automatically. The only normal caption below it
 is `单击拍照，自动识别账单`. There is no open-preview button, test heading,
 action selector or separate synthetic-review shortcut. A tap or Enter activation
 captures once, displays the photo while recognition runs, and then shows only
@@ -46,7 +48,9 @@ capture for `app.config.lifetime === 'cut'`, and may omit the wx camera factory
 on unsupported runtimes. This device experiment has no hostTarget gate; removing
 that gate alone does not establish card/full-screen camera support.
 
-Automatic preview is restricted to a ready, visible page. Exposure still requires
+Automatic preview is restricted to a ready, visible page with a saved binding.
+Leaving during binding aborts the request; a late approval cannot open the camera.
+Binding failures keep the camera closed and offer a retry. Exposure still requires
 an explicit activation. Direction, system back and voice wakeup stay with the
 host; Backspace and Escape clear resources before the normal return action.
 Repeated key events and duplicate activation callbacks do not cause another
@@ -73,17 +77,19 @@ an error and allows retry with the same photo, without an extra exposure.
 
 ## Target-device checklist
 
-1. Open from the card and full-screen entry separately. Verify preview appears
-   automatically and the short caption fits below it without scrolling.
+1. On an unbound device, open from the card and full-screen entry separately.
+   Verify the binding URL/code appears first with no camera access. Approve on
+   the phone, then verify preview opens automatically and the short caption fits
+   below it without scrolling. Reopen with a saved binding: no new code is shown.
 2. Leave preview open beyond 10 seconds. Verify moving frames remain visible
    and no exposure occurs until a separate tap/confirmation.
 3. Tap once. Verify one exposure, the frozen photo and recognition status, then
-   first-use phone authorization and the actual returned bill with a large amount
+   the actual returned bill with a large amount
    and currency symbol. Confirm amount, date, merchant and currency against the receipt.
 4. Repeat taps and key callbacks during exposure and recognition. Verify one
    exposure and one recognition operation. Inspect native framing/readability
    separately because preview and telephoto still framing may differ.
-5. Exit/background during permission acquisition, exposure and recognition. Return
+5. Exit/background during binding, permission acquisition, exposure and recognition. Return
    and verify a fresh preview with no stale image or bill. Camera privacy
    indicators must turn off on exit.
 6. Deny permission and test unavailable camera/video APIs. Verify a visible error,
@@ -91,8 +97,10 @@ an error and allows retry with the same photo, without an extra exposure.
 7. Repeat exit/reopen at least 20 times and inspect camera locks and memory growth.
    Verify HTTPS traffic goes only to the configured backend; no photo or receipt
    persists locally. The saved credential must survive Agent exit and device restart
-   without another code. Test pairing-code expiry and phone revocation; exit must
-   cancel a pending authorization/upload. Deploy both sides and run migration first.
+   without another code. Test binding denial/expiry and retry before camera access.
+   Test phone revocation: a rejected recognition clears the photo and requires
+   binding again before reopening the camera. Exit must cancel a pending
+   authorization/upload. Deploy both sides and run migration first.
 8. Record device, firmware, AIUI version and actual key callbacks. Rebuild and sync
    the latest resource package before comparing results.
 

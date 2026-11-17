@@ -32,6 +32,11 @@ This adapter is not a provider-response parser or a retry mechanism.
 The agent uses HTTPS /api/v1/receipt-devices with phone-approved, receipt-only
 device grants. POST /pairings starts authorization, POST /pairings/token polls,
 and POST /receipt-recognition accepts a bearer grant plus X-Receipt-Upload: 1.
+The page calls receiptApi.authorize() at entry, before requesting the camera.
+Without a saved grant, phone binding must finish before preview/capture; this
+operation does not encode or upload a photo. With a saved grant it makes no
+network request. Recognition still validates authorization at the backend; a
+401/403 clears the grant and photo and requires binding again before preview.
 See the Flow Ledger 2 docs/receipt-devices.md for owner approval and revocation.
 Pairings last 10 minutes. New grants return expiresAt: null and remain valid
 until revocation/password change. Finite grants from older deployments keep

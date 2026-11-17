@@ -30,7 +30,7 @@ function page(overrides = {}) {
     createCanvasContext(id) { assert.equal(id, 'captured-photo'); return { clearRect: (...args) => canvasCalls.push(['clear', ...args]), drawImage: (...args) => canvasCalls.push(['draw', ...args]), flush: () => canvasCalls.push(['flush']) }; },
   };
   const recognize = async (photo, options) => { recognitions++; return overrides.recognize ? overrides.recognize(photo, options) : result(); };
-  const p = new Function('wx', 'createViewfinderController', 'createPhotoDisplayController', 'createReceiptRecognitionController', 'createReceiptApi', 'createReceiptCredentialStore', 'presentBill', 'globalThis', 'Date', 'console', script)(wx, createViewfinderController, createPhotoDisplayController, createReceiptRecognitionController, options => ({ recognize: (photo, callOptions) => { overrides.authorization?.(options.notifyAuthorization); return recognize(photo, callOptions); }, close: () => overrides.close?.() }), createReceiptCredentialStore, presentBill, environment, { now: () => time }, overrides.hostConsole || { log() {} });
+  const p = new Function('wx', 'createViewfinderController', 'createPhotoDisplayController', 'createReceiptRecognitionController', 'createReceiptApi', 'createReceiptCredentialStore', 'presentBill', 'globalThis', 'Date', 'console', script)(wx, createViewfinderController, createPhotoDisplayController, createReceiptRecognitionController, options => ({ authorize: callOptions => { overrides.authorization?.(options.notifyAuthorization); return overrides.authorize ? overrides.authorize(callOptions) : Promise.resolve(true); }, recognize, close: () => overrides.close?.() }), createReceiptCredentialStore, presentBill, environment, { now: () => time }, overrides.hostConsole || { log() {} });
   p.setData = function(value) { updates++; Object.assign(this.data, value); }; p.onLoad();
   return { p, events, revoked, decoded, canvasCalls, stream, advance(ms) { time += ms; }, counts: () => ({ requests, shots, recognitions, stops, updates }) };
 }
@@ -39,7 +39,7 @@ test('opening the agent automatically previews after ready, without exposing a p
   const r = page(); t.after(() => r.p.onUnload()); r.p.onShow(); assert.equal(r.counts().requests, 0);
   r.p.onKeyUp(key('Enter')); assert.equal(r.counts().shots, 0);
   assert.equal(await r.p.onReady(), true); assert.equal(r.counts().requests, 1); assert.equal(r.p.data.captureState, 'previewing');
-  assert.equal(r.p.data.entryHint, '单击拍照，自动识别账单'); assert.equal(r.p.data.message, '');
+  assert.equal(r.p.data.entryHint, '单击拍照，自动识别账单'); assert.equal(r.p.data.message, ''); assert.equal(r.p.data.busy, false);
   r.p.onReady(); r.p.onShow(); assert.equal(r.counts().requests, 1); assert.equal(r.counts().shots, 0);
 });
 
@@ -83,14 +83,14 @@ test('the shutter stays inactive while the automatic preview is still acquiring 
 test('returning while an old stream is pending opens a fresh preview after the stale stream is stopped', async t => {
   const acquisition = deferred(); let calls = 0;
   const r = page({ requestStream: () => ++calls === 1 ? acquisition.promise : r.stream() }); t.after(() => r.p.onUnload());
-  const opening = r.p.onReady(); r.p.onHide(); r.p.onShow(); acquisition.resolve(r.stream());
+  const opening = r.p.onReady(); await flush(); r.p.onHide(); r.p.onShow(); acquisition.resolve(r.stream());
   assert.equal(await opening, false); await flush(); assert.equal(r.counts().requests, 2); assert.equal(r.counts().stops, 1);
   assert.equal(r.p.data.captureState, 'previewing'); assert.equal(r.counts().shots, 0);
 });
 
 test('unloading before permission resolves stops the late stream without updating the page', async () => {
   const acquisition = deferred(); const r = page({ requestStream: () => acquisition.promise });
-  const pending = r.p.onReady(); r.p.onUnload(); const count = r.counts().updates;
+  const pending = r.p.onReady(); await flush(); r.p.onUnload(); const count = r.counts().updates;
   acquisition.resolve(r.stream()); assert.equal(await pending, false); assert.equal(r.counts().stops, 1); assert.equal(r.counts().updates, count);
 });
 
@@ -153,15 +153,57 @@ test('host return clears the camera and bill while leaving the host back action 
   }
 });
 
-test('phone-code UI is temporary, cancellation aborts recognition, and unload closes the client without deleting saved authorization', async () => {
+test('unbound entry shows the phone code before camera access and cancels binding when hidden', async () => {
   let notify, signal, closes = 0; const pending = deferred();
-  const r = page({ authorization: callback => { notify = callback; }, recognize: (photo, options) => { signal = options.signal; return pending.promise; }, close: () => closes++ });
-  await r.p.onReady(); const run = r.p.capture(); await flush();
+  const r = page({ authorization: callback => { notify = callback; }, authorize: options => { signal = options.signal; return pending.promise; }, close: () => closes++ });
+  const run = r.p.onReady();
   notify({ state: 'pending', userCode: 'ABCD-EFGH', verificationUri: 'https://ledger.zcorw.xyz/receipt-devices' });
-  assert.equal(r.p.data.authorizationVisible, true); assert.equal(r.p.data.authorizationCode, 'ABCD-EFGH'); assert.equal(r.counts().stops, 1);
+  assert.equal(r.p.data.authorizationVisible, true); assert.equal(r.p.data.authorizationCode, 'ABCD-EFGH'); assert.equal(r.p.data.bindingState, 'binding');
+  assert.equal(r.counts().requests, 0); assert.equal(await r.p.capture(), false); assert.equal(r.counts().shots, 0); assert.equal(r.counts().recognitions, 0);
   r.p.onHide(); assert.equal(signal.aborted, true); assert.equal(r.p.data.authorizationVisible, false); assert.equal(r.p.data.authorizationCode, '');
   notify({ state: 'pending', userCode: 'LATE-CODE', verificationUri: 'https://ledger.zcorw.xyz/receipt-devices' }); assert.equal(r.p.data.authorizationVisible, false);
-  pending.resolve(result()); assert.equal(await run, false); r.p.onUnload(); assert.equal(closes, 1);
+  pending.resolve(true); assert.equal(await run, false); assert.equal(r.counts().requests, 0); r.p.onUnload(); assert.equal(closes, 1);
+});
+
+test('approval opens preview once and a press begun during binding cannot take a photo', async t => {
+  let notify, bindings = 0; const approval = deferred();
+  const r = page({ authorization: callback => { notify = callback; }, authorize: () => { bindings++; return approval.promise; } }); t.after(() => r.p.onUnload());
+  r.p.onShow(); const run = r.p.onReady(); r.p.onReady(); r.p.onShow(); assert.equal(bindings, 1);
+  notify({ state: 'pending', userCode: 'ABCD-EFGH', verificationUri: 'https://ledger.zcorw.xyz/receipt-devices' }); r.p.onKeyDown(key('Enter'));
+  approval.resolve(true); assert.equal(await run, true); assert.equal(r.p.data.bindingState, 'bound'); assert.equal(r.p.data.authorizationVisible, false); assert.equal(r.p.data.authorizationCode, '');
+  assert.equal(r.counts().requests, 1); assert.equal(await r.p.onKeyUp(key('Enter')), false); assert.equal(r.counts().shots, 0);
+  r.p.onKeyDown(key('Enter')); assert.equal(await r.p.onKeyUp(key('Enter')), true); assert.equal(r.counts().shots, 1);
+});
+
+test('returning during binding ignores old completion and waits for the new approval', async t => {
+  const first = deferred(), second = deferred(); const signals = [];
+  const r = page({ authorize: options => { signals.push(options.signal); return signals.length === 1 ? first.promise : second.promise; } }); t.after(() => r.p.onUnload());
+  const old = r.p.onReady(); r.p.onHide(); const current = r.p.onShow(); assert.equal(signals[0].aborted, true);
+  first.resolve(true); assert.equal(await old, false); assert.equal(r.counts().requests, 0); assert.equal(r.p.data.bindingState, 'checking');
+  second.resolve(true); assert.equal(await current, true); assert.equal(r.counts().requests, 1);
+});
+
+test('unloading during binding aborts and ignores a late approval without page updates', async () => {
+  const approval = deferred(); let signal;
+  const r = page({ authorize: options => { signal = options.signal; return approval.promise; } });
+  const run = r.p.onReady(); r.p.onUnload(); const updates = r.counts().updates; assert.equal(signal.aborted, true);
+  approval.resolve(true); assert.equal(await run, false); assert.equal(r.counts().updates, updates); assert.equal(r.counts().requests, 0);
+});
+
+test('binding failures keep the camera closed and retry binding before preview', async () => {
+  for (const code of ['DEVICE_ACCESS_DENIED', 'DEVICE_CODE_EXPIRED', 'NETWORK_ERROR', 'AUTH_STORAGE_FAILED']) {
+    let calls = 0; const r = page({ authorize: async () => { if (++calls === 1) throw new Error(code); return true; } });
+    assert.equal(await r.p.onReady(), false); assert.equal(r.p.data.bindingState, 'failed'); assert.equal(r.p.data.canRetry, true); assert.ok(r.p.data.message);
+    assert.equal(r.counts().requests, 0); assert.equal(r.counts().shots, 0); assert.equal(await r.p.retry(), true);
+    assert.equal(calls, 2); assert.equal(r.p.data.bindingState, 'bound'); assert.equal(r.counts().requests, 1); r.p.onUnload();
+  }
+});
+
+test('a revoked grant discards the photo and requires binding again before reopening camera', async t => {
+  let bindings = 0; const r = page({ authorize: async () => { bindings++; return true; }, recognize: async () => ({ status: 401 }) }); t.after(() => r.p.onUnload());
+  await r.p.onReady(); assert.equal(await r.p.capture(), false); assert.equal(r.p.data.bindingState, 'failed'); assert.match(r.p.data.message, /绑定已失效/);
+  assert.equal(r.p.controller.snapshot().photo, null); assert.equal(r.p.data.photoVisible, false); assert.equal(r.p.data.canRetry, true);
+  assert.equal(await r.p.retry(), true); assert.equal(bindings, 2); assert.equal(r.counts().requests, 2); assert.equal(r.counts().shots, 1);
 });
 
 test('retaking after recognition failure releases the old photo and opens a fresh preview', async t => {

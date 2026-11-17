@@ -10,10 +10,11 @@ import { createReceiptApi } from '../../lib/receipt-api.js';
 import { createReceiptCredentialStore } from '../../lib/receipt-credential-store.js';
 import { presentBill } from '../../lib/bill-presentation.js';
 export default {
-  data: { busy: false, captureState: 'idle', recognitionState: 'idle', previewItems: [], photoVisible: false, photoMessage: '', billVisible: false, bill: {}, authorizationVisible: false, authorizationCode: '', authorizationUrl: '', message: '正在打开相机…', canRetry: false, entryHint: '单击拍照，自动识别账单' },
+  data: { busy: false, bindingState: 'checking', captureState: 'idle', recognitionState: 'idle', previewItems: [], photoVisible: false, photoMessage: '', billVisible: false, bill: {}, authorizationVisible: false, authorizationCode: '', authorizationUrl: '', message: '正在检查绑定…', canRetry: false, entryHint: '单击拍照，自动识别账单' },
   onLoad() {
     this.pageHidden = false; this.pageClosed = false; this.pageReady = false;
     this.wantsPreview = false; this.previewStarting = false; this.captureActionBusy = false; this.captureRun = 0;
+    this.bindingReady = false; this.bindingRun = 0; this.bindingAbort = null;
     this.lastCaptureInput = null; this.keySequence = 0; this.pendingKeyAction = null;
     this.photoDisplay = createPhotoDisplayController({
       decode: photo => {
@@ -28,7 +29,7 @@ export default {
     this.receiptApi = createReceiptApi({
       credentialStore: createReceiptCredentialStore({ wx }),
       notifyAuthorization: ({ state, userCode, verificationUri }) => {
-        if (!this.pageClosed && !this.pageHidden) this.setData({ authorizationVisible: state === 'pending', authorizationCode: userCode || '', authorizationUrl: verificationUri ? verificationUri.replace('https://', '') : '' });
+        if (!this.pageClosed && !this.pageHidden) this.setData({ ...(state === 'pending' && !this.bindingReady ? { bindingState: 'binding' } : {}), authorizationVisible: state === 'pending', authorizationCode: userCode || '', authorizationUrl: verificationUri ? verificationUri.replace('https://', '') : '' });
       },
     });
     this.recognition = createReceiptRecognitionController({
@@ -64,7 +65,7 @@ export default {
           this.logDiagnostic('[capture]', failure);
         }
         if (recognition.state === 'recognized') message = '';
-        this.setData({ captureState: state, previewItems: preview ? [preview] : [], busy: busy || recognition.busy || this.captureActionBusy, canRetry: !!failure || recognition.state === 'failed', message });
+        this.setData({ captureState: state, previewItems: preview ? [preview] : [], busy: busy || recognition.busy || this.captureActionBusy || !!this.bindingAbort, ...(this.bindingReady ? { canRetry: !!failure || recognition.state === 'failed', message } : {}) });
         if (photo && !this.data.billVisible) this.photoDisplay.show(photo);
         else if (!photo) this.photoDisplay.clear();
         this.maybeOpenPreview();
@@ -76,14 +77,41 @@ export default {
     if (this.pageReady) return this.maybeOpenPreview();
   },
   onReady() { this.pageReady = true; this.wantsPreview = true; return this.maybeOpenPreview(); },
+  bindingError(code) {
+    const messages = { AUTH_STORAGE_UNAVAILABLE: '当前运行时不支持保存设备绑定，请升级运行时', AUTH_STORAGE_FAILED: '设备绑定存储失败，请重试', DEVICE_ACCESS_DENIED: '已拒绝绑定，请重新绑定', DEVICE_CODE_EXPIRED: '绑定码已过期，请重新绑定', DEVICE_CODE_USED: '绑定码已使用，请重新绑定', DEVICE_RATE_LIMIT: '绑定请求过于频繁，请稍后重试', DEVICE_ENDPOINT_UNAVAILABLE: '后端尚未部署设备绑定接口', TIMEOUT: '绑定请求超时，请重试', NETWORK_ERROR: '连接失败，请检查网络后重试', BACKEND_UNAVAILABLE: '绑定服务暂不可用，请稍后重试', INVALID_RESULT: '绑定返回结果无效，请重试' };
+    return messages[code] || '设备绑定未完成，请重试';
+  },
+  async ensureBinding() {
+    if (!this.pageReady || !this.allowCameraAction() || this.bindingAbort || this.bindingReady) return false;
+    const current = ++this.bindingRun, request = new AbortController(); this.bindingAbort = request;
+    this.setData({ bindingState: 'checking', busy: true, canRetry: false, message: '正在检查绑定…' });
+    try {
+      await this.receiptApi.authorize({ signal: request.signal });
+      if (!this.allowCameraAction() || current !== this.bindingRun) return false;
+      this.bindingReady = true; this.bindingAbort = null;
+      this.setData({ bindingState: 'bound', busy: false, canRetry: false, message: '', authorizationVisible: false, authorizationCode: '', authorizationUrl: '' });
+      return await this.maybeOpenPreview();
+    } catch (failure) {
+      if (this.allowCameraAction() && current === this.bindingRun) {
+        this.wantsPreview = false;
+        this.setData({ bindingState: 'failed', busy: false, canRetry: true, authorizationVisible: false, authorizationCode: '', authorizationUrl: '', message: this.bindingError(failure?.message) });
+      }
+      return false;
+    } finally { if (this.bindingAbort === request) this.bindingAbort = null; }
+  },
+  cancelBinding() {
+    this.bindingRun++; this.bindingReady = false;
+    this.bindingAbort?.abort(); this.bindingAbort = null;
+  },
   maybeOpenPreview() {
     if (!this.pageReady || this.pageHidden || this.pageClosed || !this.wantsPreview || this.previewStarting || this.captureActionBusy) return false;
+    if (!this.bindingReady) return this.ensureBinding();
     const current = this.controller?.snapshot();
     if (!current || current.busy || current.state !== 'idle' || this.recognition.snapshot().busy) return false;
     return this.startPreview();
   },
   async startPreview() {
-    if (!this.allowCameraAction() || this.previewStarting) return false;
+    if (!this.allowCameraAction() || !this.bindingReady || this.previewStarting) return false;
     this.previewStarting = true;
     try {
       this.recognition.cancel();
@@ -110,11 +138,11 @@ export default {
   allowCameraAction() { return !this.pageClosed && !this.pageHidden; },
   onHide() {
     this.pageHidden = true; this.wantsPreview = false; this.pendingKeyAction = null; this.lastCaptureInput = null; this.captureRun++; this.captureActionBusy = false;
-    this.recognition?.cancel(); this.controller?.discard('hidden'); this.photoDisplay?.clear();
+    this.cancelBinding(); this.recognition?.cancel(); this.controller?.discard('hidden'); this.photoDisplay?.clear();
   },
   onUnload() {
     this.pageHidden = true; this.pageClosed = true; this.wantsPreview = false; this.pendingKeyAction = null; this.lastCaptureInput = null; this.captureRun++; this.captureActionBusy = false;
-    this.recognition?.close(); this.receiptApi?.close(); this.controller?.close('unload'); this.photoDisplay?.close();
+    this.cancelBinding(); this.recognition?.close(); this.receiptApi?.close(); this.controller?.close('unload'); this.photoDisplay?.close();
   },
   keyboardAction() {
     if (this.data.billVisible || this.captureActionBusy || this.recognition?.snapshot().busy) return null;
@@ -149,11 +177,11 @@ export default {
   openPreview(event) {
     if (!this.allowCameraAction() || this.captureActionBusy || this.recognition.snapshot().busy || this.controller.snapshot().busy) return Promise.resolve(false);
     if (!this.acceptCaptureInput(event, 'open-preview')) return Promise.resolve(false);
-    this.wantsPreview = true; return this.startPreview();
+    this.wantsPreview = true; return this.bindingReady ? this.startPreview() : this.ensureBinding();
   },
   async confirmCapture(event) {
     event?.preventDefault?.(); event?.stopPropagation?.();
-    if (!this.allowCameraAction() || this.data.billVisible || this.captureActionBusy || this.recognition.snapshot().busy || this.controller.snapshot().busy || this.controller.snapshot().state !== 'previewing') return false;
+    if (!this.allowCameraAction() || !this.bindingReady || this.data.billVisible || this.captureActionBusy || this.recognition.snapshot().busy || this.controller.snapshot().busy || this.controller.snapshot().state !== 'previewing') return false;
     if (!this.acceptCaptureInput(event, 'confirm-photo')) return false;
     this.wantsPreview = false; this.captureActionBusy = true; const current = ++this.captureRun;
     try {
@@ -176,22 +204,27 @@ export default {
       this.wantsPreview = false; this.photoDisplay.clear(); this.controller.discard('recognized');
       return true;
     }
+    if (this.allowCameraAction() && current === this.captureRun && this.recognition.snapshot().error === 'AUTH_REQUIRED') {
+      this.discard('authorization-expired');
+      this.setData({ bindingState: 'failed', busy: false, canRetry: true, message: '设备绑定已失效，请重新绑定' });
+    }
     return false;
   },
   retry(event) {
     if (!this.allowCameraAction() || this.data.billVisible || this.captureActionBusy || this.recognition.snapshot().busy) return Promise.resolve(false);
     if (!this.acceptCaptureInput(event, 'retry')) return Promise.resolve(false);
+    if (!this.bindingReady) { this.wantsPreview = true; return this.ensureBinding(); }
     const photo = this.controller.snapshot().photo;
     return photo ? this.runRecognition(photo) : this.openPreview(event);
   },
   retake() {
     if (!this.allowCameraAction() || this.captureActionBusy || this.recognition.snapshot().busy) return false;
-    this.discard('retake'); this.wantsPreview = true; return this.startPreview();
+    this.discard('retake'); this.wantsPreview = true; return this.maybeOpenPreview();
   },
   capture(event) { return this.data.canRetry ? this.retry(event) : this.confirmCapture(event); },
   discard(reason = 'cancel') {
     this.wantsPreview = false; this.pendingKeyAction = null; this.lastCaptureInput = null; this.captureRun++; this.captureActionBusy = false;
-    this.recognition?.cancel(); this.controller?.discard(reason); this.photoDisplay?.clear();
+    this.cancelBinding(); this.recognition?.cancel(); this.controller?.discard(reason); this.photoDisplay?.clear();
   },
 };
 </script>
@@ -202,12 +235,12 @@ export default {
   <view class="details"><text>{{bill.expenseDate}}</text><text>{{bill.category}}</text></view>
   <text class="note" ink:if="{{bill.note}}">{{bill.note}}</text>
 </view></scroll-view>
-<view class="authorization" ink:if="{{authorizationVisible}}"><text class="hint">手机登录并打开</text><text class="authorization-url">{{authorizationUrl}}</text><text class="authorization-code">{{authorizationCode}}</text><text class="hint">核对授权码并允许收据识别</text></view>
-<view class="preview-frame" ink:if="{{!billVisible && !photoVisible && !authorizationVisible}}" bindtap="capture"><video ink:for="{{previewItems}}" ink:key="id" data-session="{{item.id}}" src="{{item.src}}" class="viewfinder" autoplay="true" muted="true" object-fit="contain" bindplaying="previewPlaying" binderror="previewError"></video></view>
+<view class="authorization" ink:if="{{authorizationVisible}}"><text class="hint">请先绑定知产</text><text class="authorization-url">{{authorizationUrl}}</text><text class="authorization-code">{{authorizationCode}}</text><text class="hint">手机打开网址，核对绑定码并允许识别</text></view>
+<view class="preview-frame" ink:if="{{bindingState === 'bound' && !billVisible && !photoVisible && !authorizationVisible}}" bindtap="capture"><video ink:for="{{previewItems}}" ink:key="id" data-session="{{item.id}}" src="{{item.src}}" class="viewfinder" autoplay="true" muted="true" object-fit="contain" bindplaying="previewPlaying" binderror="previewError"></video></view>
 <canvas id="captured-photo" width="400" height="180" class="{{photoVisible && !billVisible && !authorizationVisible ? 'photo-canvas' : 'photo-canvas photo-hidden'}}"></canvas>
 <text class="hint" ink:if="{{!billVisible && !authorizationVisible}}">{{message || entryHint}}</text>
 <text class="hint" ink:if="{{!billVisible && !authorizationVisible && photoMessage}}">{{photoMessage}}</text>
-<button class="retry" ink:if="{{!billVisible && canRetry}}" bindtap="retry" disabled="{{busy}}">重试</button>
+<button class="retry" ink:if="{{!billVisible && canRetry}}" bindtap="retry" disabled="{{busy}}">{{bindingState === 'failed' ? '重新绑定' : '重试'}}</button>
 <button class="retry" ink:if="{{!billVisible && canRetry && photoVisible}}" bindtap="retake" disabled="{{busy}}">重拍</button>
 </view></page>
 <style>

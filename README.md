@@ -4,9 +4,9 @@
 
 A receipt capture and recognition agent for Rokid AIUI, paired with Flow Ledger 2.
 
-- Opening the agent starts a live viewfinder with the caption “单击拍照，自动识别账单”.
+- Opening the agent checks its saved binding first. An unbound device shows the phone binding URL and code before opening the camera. After approval, or with an existing saved binding, the live viewfinder opens automatically with the caption “单击拍照，自动识别账单”.
 - One activation releases the preview camera, captures a photo and starts recognition automatically. The frozen photo stays visible during recognition.
-- First use requires signing in on the phone at the [device authorization page](https://ledger.zcorw.xyz/receipt-devices), entering the code shown on the glasses and explicitly approving it. Receipt-only authorization remains valid until revoked or the account password changes. The credential is saved in Agent-isolated storage and restored after exit or device restart. Clearing Agent data requires authorization again.
+- First use requires signing in on the phone at the [device authorization page](https://ledger.zcorw.xyz/receipt-devices), entering the code shown on the glasses and explicitly approving it before capture. Receipt-only authorization remains valid until revoked or the account password changes. The credential is saved in Agent-isolated storage and restored after exit or device restart. Clearing Agent data requires authorization again.
 - The original WebP photo is converted to JPEG and uploaded over HTTPS. The backend calls its configured recognition service. Validated actual bill fields appear with a prominent amount and currency symbol. Expenses are not saved automatically.
 - Cancel, hide and exit stop the viewfinder, clear photos and abort network work. Recognition failures can retry the same photo or take a new one.
 - Voice changes to bill values remain deferred; no microphone permission is requested.

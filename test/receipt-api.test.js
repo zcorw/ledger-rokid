@@ -28,6 +28,23 @@ function fixture(overrides = {}) {
   });
   return { api, calls, states, encoded, advance: ms => { clock += ms; }, starts: () => starts };
 }
+test('entry binding saves authorization without a photo, encoding or recognition upload', async () => {
+  const store = memoryStore(), f = fixture({ store });
+  assert.equal(await f.api.authorize(), true); assert.ok(store.read()); assert.equal(f.encoded.length, 0);
+  assert.deepEqual(f.calls.map(call => call.url), ['/pairings', '/pairings/token', '/pairings/token'].map(path => prefix + path));
+  assert.deepEqual(f.states.map(state => state.state), ['pending', 'idle']);
+  await f.api.recognize(photo); assert.equal(f.starts(), 1); assert.equal(f.calls.at(-1).url, prefix + '/receipt-recognition');
+});
+test('entry binding restores a saved grant without a pairing request or phone code', async () => {
+  const f = fixture({ store: memoryStore(saved()) });
+  assert.equal(await f.api.authorize(), true); assert.equal(f.calls.length, 0); assert.deepEqual(f.states, []); assert.equal(f.encoded.length, 0);
+});
+test('cancelling entry binding stops polling without saving a credential or uploading', async () => {
+  const controller = new AbortController(), store = memoryStore();
+  const f = fixture({ store, api: { sleep: async () => controller.abort() } });
+  await assert.rejects(f.api.authorize({ signal: controller.signal }), /CANCELLED/);
+  assert.equal(store.read(), null); assert.equal(f.encoded.length, 0); assert.equal(f.calls.length, 1); assert.equal(f.states.at(-1).state, 'idle');
+});
 test('real HTTPS flow waits for approval before encoding or uploading and keeps secrets out of UI', async () => {
   assert.equal(receiptApiConfig.baseUrl, origin);
   const f = fixture(); const result = await f.api.recognize(photo); assert.deepEqual(result, { status: 200, body: candidate });

@@ -129,6 +129,10 @@ export function createReceiptApi({ fetchImpl = (...args) => globalThis.fetch(...
   }
 
   return {
+    async authorize({ signal } = {}) {
+      await authorized(signal); active(signal);
+      return true;
+    },
     async recognize(photo, { signal } = {}) {
       const token = await authorized(signal); active(signal);
       const image = await encodePhoto(photo, { signal }); active(signal);

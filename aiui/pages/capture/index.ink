@@ -343,17 +343,16 @@ export default {
 </script>
 <page>
 <view class="bill-screen" ink:if="{{billVisible}}">
-<scroll-view class="bill-fields" scroll-y="true"><view class="bill">
-  <view class="bill-main">
-    <view class="bill-field"><text class="field-label">商户</text><text class="field-value">{{bill.merchant}}</text></view>
-    <view class="bill-field"><text class="field-label">金额</text><view class="total"><text class="currency">{{bill.currencySymbol}}</text><text class="amount" style="font-size:{{bill.amountFontSize}}px">{{bill.amountText}}</text><text class="currency-code" ink:if="{{bill.currencyCode}}">({{bill.currencyCode}})</text></view><text class="currency-notice" ink:if="{{bill.currencyNotice}}">{{bill.currencyNotice}}</text></view>
-    <view class="bill-field"><text class="field-label">时间</text><text class="field-value">{{bill.expenseDate}}</text></view>
-    <view class="bill-field"><text class="field-label">账户</text><text class="field-value">{{bill.account}}</text></view>
+<view class="bill-fields">
+  <view class="bill-row merchant-row"><text class="field-label">商户：</text><scroll-view class="field-value" scroll-x="true"><text class="field-text">{{bill.merchant}}</text></scroll-view></view>
+  <view class="bill-row amount-row">
+    <view class="amount-field"><text class="field-label">金额：</text><scroll-view class="field-value" scroll-x="true"><view class="total"><text class="currency">{{bill.currencySymbol}}</text><text class="amount">{{bill.amountText}}</text><text class="currency-code" ink:if="{{bill.currencyCode}}">({{bill.currencyCode}})</text><text class="currency-notice" ink:if="{{bill.currencyNotice}}">{{bill.currencyNotice}}</text></view></scroll-view></view>
+    <view class="category-field"><text class="field-label">分类：</text><scroll-view class="field-value" scroll-x="true"><text class="field-text">{{bill.category}}</text></scroll-view></view>
   </view>
-  <view class="bill-category bill-field"><text class="field-label">分类</text><text class="field-value">{{bill.category}}</text></view>
-</view></scroll-view>
-<text class="review-message" ink:if="{{reviewMessage}}">{{reviewMessage}}</text>
-<text class="authorization-url" ink:if="{{writeAuthorizationUrl}}">{{writeAuthorizationUrl}}</text>
+  <view class="bill-row date-row"><text class="field-label">时间：</text><scroll-view class="field-value" scroll-x="true"><text class="field-text">{{bill.expenseDate}}</text></scroll-view></view>
+  <view class="bill-row account-row"><text class="field-label">账户：</text><scroll-view class="field-value" scroll-x="true"><text class="field-text">{{bill.account}}</text></scroll-view></view>
+</view>
+<scroll-view class="review-feedback" scroll-y="true" ink:if="{{reviewMessage || writeAuthorizationUrl}}"><text class="review-message">{{reviewMessage}}</text><text class="authorization-url" ink:if="{{writeAuthorizationUrl}}">{{writeAuthorizationUrl}}</text></scroll-view>
 <view class="review-actions"><button class="{{selectedAction === 'voice' ? 'selected' : ''}}" bindtap="voiceEdit" disabled="{{reviewBusy || submissionPending || submissionState === 'succeeded'}}">语音修改</button><button class="{{selectedAction === 'draft' ? 'selected' : ''}}" bindtap="saveDraft" disabled="{{reviewBusy || submissionPending || submissionState === 'succeeded'}}">草稿</button><button class="{{selectedAction === 'confirm' ? 'selected' : ''}}" bindtap="submitBill" disabled="{{reviewBusy}}">{{submissionState === 'succeeded' || submissionState === 'conflict' ? '继续拍摄' : '确认'}}</button></view>
 </view>
 <view class="{{billVisible ? 'screen screen-hidden' : 'screen'}}">
@@ -377,23 +376,23 @@ export default {
 .authorization { display:flex; flex-direction:column; align-items:center; }
 .authorization-url { font-size:16px; text-align:center; margin-top:4px; overflow-wrap:anywhere; }
 .authorization-code { font-size:40px; font-weight:700; margin-top:8px; }
-.bill-screen { width:100%; height:100%; box-sizing:border-box; padding:12px; background-color:#000; color:#40ff5e; font-size:18px; display:flex; flex-direction:column; }
-.bill-fields { flex:1; min-height:0; width:100%; overflow-y:auto; }
-.bill { display:flex; flex-direction:row; gap:16px; width:100%; }
-.bill-main { flex:3; min-width:0; }
-.bill-category { flex:1; min-width:0; }
-.bill-field { margin-bottom:8px; }
-.field-label { display:block; font-size:15px; opacity:0.8; }
-.field-value { display:block; min-height:22px; overflow-wrap:anywhere; white-space:pre-wrap; }
-.currency-code, .currency-notice { font-size:15px; }
-.review-actions { display:flex; flex-direction:row; gap:8px; flex-shrink:0; padding-top:8px; }
-.review-actions button { flex:1; min-width:0; font-size:16px; padding:8px 2px; border:1px solid #155c24; }
-.review-actions .selected { border:2px solid #40ff5e; }
-.review-message { flex-shrink:0; font-size:15px; max-height:42px; overflow:hidden; }
-.total { display:flex; flex-direction:row; flex-wrap:wrap; align-items:baseline; gap:4px; }
-.currency { font-size:28px; font-weight:600; }
-.amount { font-weight:700; line-height:1.08; max-width:100%; overflow-wrap:anywhere; }
-.merchant { font-size:22px; font-weight:600; overflow-wrap:anywhere; }
-.details { display:flex; flex-direction:row; justify-content:space-between; gap:12px; font-size:18px; }
-.note { font-size:18px; white-space:pre-wrap; overflow-wrap:anywhere; }
+.bill-screen { width:100%; height:100%; box-sizing:border-box; padding:12px 16px; background-color:#000; color:#40ff5e; font-size:18px; display:flex; flex-direction:column; }
+.bill-fields { flex:1; min-height:112px; width:100%; display:flex; flex-direction:column; }
+.bill-row { flex:1; min-height:28px; width:100%; display:flex; flex-direction:row; align-items:center; }
+.field-label { flex-shrink:0; width:54px; font-size:18px; line-height:28px; }
+.field-value { flex:1; min-width:0; height:28px; overflow-x:auto; overflow-y:hidden; }
+.field-text { display:block; font-size:18px; line-height:28px; white-space:nowrap; }
+.amount-field { width:62%; min-width:0; display:flex; flex-direction:row; align-items:center; }
+.category-field { flex:1; min-width:0; margin-left:12px; display:flex; flex-direction:row; align-items:center; }
+.total { display:flex; flex-direction:row; align-items:baseline; height:28px; white-space:nowrap; }
+.currency { flex-shrink:0; font-size:22px; line-height:28px; font-weight:600; }
+.amount { flex-shrink:0; font-size:24px; line-height:28px; font-weight:700; }
+.currency-code, .currency-notice { flex-shrink:0; margin-left:4px; font-size:14px; line-height:28px; }
+.review-feedback { height:40px; width:100%; flex-shrink:0; overflow-y:auto; }
+.review-message { display:block; font-size:14px; line-height:20px; overflow-wrap:anywhere; }
+.bill-screen .authorization-url { display:block; font-size:14px; line-height:20px; margin-top:0; text-align:left; overflow-wrap:anywhere; }
+.review-actions { display:flex; flex-direction:row; flex-shrink:0; padding-top:8px; }
+.review-actions button { flex:1; min-width:0; height:36px; font-size:16px; padding:4px 0; border:2px solid #155c24; background-color:#000; color:#40ff5e; }
+.review-actions button + button { margin-left:12px; }
+.review-actions .selected { border-color:#40ff5e; }
 </style>

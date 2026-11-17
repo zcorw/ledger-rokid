@@ -10,6 +10,7 @@ import { createReceiptApi } from '../../lib/receipt-api.js';
 import { createReceiptCredentialStore } from '../../lib/receipt-credential-store.js';
 import { presentBill } from '../../lib/bill-presentation.js';
 import { createVoiceReview } from '../../lib/voice-review.js';
+import { createDraftSaver } from '../../lib/receipt-draft.js';
 export default {
   data: { busy: false, bindingState: 'checking', captureState: 'idle', recognitionState: 'idle', previewItems: [], photoVisible: false, photoMessage: '', billVisible: false, bill: {}, receiptId: '', selectedAction: 'voice', reviewBusy: false, reviewMessage: '', authorizationVisible: false, authorizationCode: '', authorizationUrl: '', message: '正在检查绑定…', canRetry: false, entryHint: '单击拍照，自动识别账单' },
   onLoad() {
@@ -17,6 +18,15 @@ export default {
     this.wantsPreview = false; this.previewStarting = false; this.captureActionBusy = false; this.captureRun = 0;
     this.bindingReady = false; this.bindingRun = 0; this.bindingAbort = null;
     this.reviewValues = null;
+    this.drafts = createDraftSaver({
+      save: (payload, options) => this.receiptApi.saveDraft(payload, options),
+      load: (id, options) => this.receiptApi.getDraft(id, options),
+      notify: ({ state, busy, error }) => {
+        if (this.pageHidden || this.pageClosed) return;
+        const messages = { RECEIPT_ID_REQUIRED: '未取得原图标识，请更新服务后重新拍摄', DRAFT_VERSION_CONFLICT: '草稿已有更新，请在知产网站核对后继续', AUTH_REQUIRED: '设备授权已失效，请返回重新绑定' };
+        this.setData({ reviewBusy: busy, reviewMessage: state === 'saving' ? '正在保存草稿…' : state === 'saved' ? '草稿已保存，可在知产继续编辑；尚未入账' : messages[error] || '草稿保存未确认，内容已保留，请重试' });
+      },
+    });
     this.voice = createVoiceReview({
       correct: (values, transcript, options) => this.receiptApi.correct(values, transcript, options),
       notify: ({ state, busy, result, error }) => {
@@ -155,11 +165,13 @@ export default {
   },
   allowCameraAction() { return !this.pageClosed && !this.pageHidden; },
   onHide() {
+    this.drafts?.cancel();
     this.voice?.cancel(); this.setData({ reviewBusy: false });
     this.pageHidden = true; this.wantsPreview = false; this.pendingKeyAction = null; this.lastCaptureInput = null; this.captureRun++; this.captureActionBusy = false;
     this.cancelBinding(); this.recognition?.cancel(); this.controller?.discard('hidden'); this.photoDisplay?.clear();
   },
   onUnload() {
+    this.drafts?.cancel();
     this.voice?.close();
     this.pageHidden = true; this.pageClosed = true; this.wantsPreview = false; this.pendingKeyAction = null; this.lastCaptureInput = null; this.captureRun++; this.captureActionBusy = false;
     this.cancelBinding(); this.recognition?.close(); this.receiptApi?.close(); this.controller?.close('unload'); this.photoDisplay?.close();
@@ -211,6 +223,10 @@ export default {
     if (action === 'voice') {
       this.setData({ selectedAction: action });
       return this.voice.run(this.reviewValues || {});
+    }
+    if (action === 'draft') {
+      this.setData({ selectedAction: action });
+      return this.drafts.run(this.data.receiptId, this.reviewValues || {});
     }
     this.setData({ selectedAction: action, reviewMessage: '此操作将在后续步骤接通，当前账单已保留' });
     return false;

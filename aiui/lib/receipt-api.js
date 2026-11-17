@@ -135,6 +135,20 @@ export function createReceiptApi({ fetchImpl = (...args) => globalThis.fetch(...
   }
 
   return {
+    async saveDraft(payload, { signal } = {}) {
+      const token = await authorized(signal); active(signal);
+      const response = await request('/receipt-drafts', { ...json(payload, signal), headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token } });
+      if (response.status === 401) { forget(); throw error('AUTH_REQUIRED'); }
+      if (response.status !== 200) throw error(response.body?.error?.code || 'DRAFT_FAILED');
+      return response.body;
+    },
+    async getDraft(receiptId, { signal } = {}) {
+      const token = await authorized(signal); active(signal);
+      const response = await request('/receipt-drafts/' + encodeURIComponent(receiptId), { signal, headers: { Authorization: 'Bearer ' + token } });
+      if (response.status === 401) { forget(); throw error('AUTH_REQUIRED'); }
+      if (response.status !== 200) throw error(response.body?.error?.code || 'DRAFT_FAILED');
+      return response.body;
+    },
     async correct(values, transcript, { signal } = {}) {
       const token = await authorized(signal); active(signal);
       const response = await request('/review-correction', { ...json({ values, transcript }, signal), timeout: 55_000, headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token } });

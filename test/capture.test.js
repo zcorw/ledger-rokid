@@ -44,14 +44,14 @@ test('close releases references and prevents late notifications or new capture',
   const pending = c.capture(); c.close(); const before = notifications;
   resolve(image()); assert.equal(await pending, false); assert.equal(notifications, before); assert.equal(await c.capture(), false); assert.equal(c.snapshot().photo, null);
 });
-test('manifest has camera only and page lifecycle clears camera, image and recognition', () => {
+test('manifest declares capture and explicit voice input; lifecycle clears active resources', () => {
   const app = JSON.parse(readFileSync(new URL('../aiui/app.json', import.meta.url)));
-  assert.deepEqual(app.permissions, ['CAMERA']);
+  assert.deepEqual(app.permissions, ['CAMERA', 'RECORD_AUDIO']);
   const page = readFileSync(new URL('../aiui/pages/capture/index.ink', import.meta.url), 'utf8');
   const script = page.match(/<script setup>([\s\S]*?)<\/script>/)[1].replace(/^import .*;$/gm, '').replace('export default', 'return');
   const definition = new Function('wx', 'createViewfinderController', script)({}, createViewfinderController);
   assert.equal(typeof definition.onLoad, 'function');
-  const calls = []; definition.captureRun = 0;
+  const calls = []; definition.captureRun = 0; definition.setData = value => Object.assign(definition.data, value);
   definition.recognition = { cancel() { calls.push('recognition-cancel'); }, close() { calls.push('recognition-close'); } };
   definition.controller = { discard(reason) { calls.push('camera-' + reason); }, close(reason) { calls.push('camera-' + reason); } };
   definition.photoDisplay = { clear() { calls.push('photo-clear'); }, close() { calls.push('photo-close'); } };

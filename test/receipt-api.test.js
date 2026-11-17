@@ -46,6 +46,15 @@ test('entry binding saves authorization without a photo, encoding or recognition
   assert.deepEqual(f.states.map(state => state.state), ['pending', 'idle']);
   await f.api.recognize(photo); assert.equal(f.starts(), 1); assert.equal(f.calls.at(-1).url, prefix + '/receipt-recognition');
 });
+
+test('voice correction sends only the transcript and candidate through the authenticated JSON API', async () => {
+  const values = { amount: '614' }, reply = { values, changedFields: [], warnings: [] };
+  const f = fixture({ fetch: async url => url.endsWith('/review-correction') ? json(reply) : null });
+  assert.deepEqual(await f.api.correct(values, '金额改为614'), reply);
+  const call = f.calls.at(-1); assert.equal(call.headers.Authorization, 'Bearer ' + 's'.repeat(43));
+  assert.deepEqual(JSON.parse(call.body), { values, transcript: '金额改为614' });
+  assert.equal(call.credentials, 'omit'); assert.equal(f.encoded.length, 0);
+});
 test('entry binding restores a saved grant without a pairing request or phone code', async () => {
   const f = fixture({ store: memoryStore(saved()) });
   assert.equal(await f.api.authorize(), true); assert.equal(f.calls.length, 0); assert.deepEqual(f.states, []); assert.equal(f.encoded.length, 0);

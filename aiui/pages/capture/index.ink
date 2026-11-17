@@ -9,12 +9,29 @@ import { createReceiptRecognitionController } from '../../lib/receipt-recognitio
 import { createReceiptApi } from '../../lib/receipt-api.js';
 import { createReceiptCredentialStore } from '../../lib/receipt-credential-store.js';
 import { presentBill } from '../../lib/bill-presentation.js';
+import { createVoiceReview } from '../../lib/voice-review.js';
 export default {
   data: { busy: false, bindingState: 'checking', captureState: 'idle', recognitionState: 'idle', previewItems: [], photoVisible: false, photoMessage: '', billVisible: false, bill: {}, receiptId: '', selectedAction: 'voice', reviewBusy: false, reviewMessage: '', authorizationVisible: false, authorizationCode: '', authorizationUrl: '', message: '正在检查绑定…', canRetry: false, entryHint: '单击拍照，自动识别账单' },
   onLoad() {
     this.pageHidden = false; this.pageClosed = false; this.pageReady = false;
     this.wantsPreview = false; this.previewStarting = false; this.captureActionBusy = false; this.captureRun = 0;
     this.bindingReady = false; this.bindingRun = 0; this.bindingAbort = null;
+    this.reviewValues = null;
+    this.voice = createVoiceReview({
+      correct: (values, transcript, options) => this.receiptApi.correct(values, transcript, options),
+      notify: ({ state, busy, result, error }) => {
+        if (this.pageHidden || this.pageClosed) return;
+        const labels = { amount: '金额', expenseDate: '时间', currencyCode: '币种', merchant: '商户', category: '分类', accountId: '账户', accountName: '账户', note: '备注' };
+        const messages = { SPEECH_UNSUPPORTED: '当前眼镜不支持语音输入，请在知产网站继续编辑', SPEECH_PERMISSION: '未获得麦克风权限，账单已保留', SPEECH_EMPTY: '没有听清，请再说一次', SPEECH_TIMEOUT: '语音输入超时，请重试', AUTH_REQUIRED: '设备授权已失效，请返回重新绑定' };
+        let message = state === 'listening' ? '请说出要修改的内容…' : state === 'correcting' ? '正在修改账单…' : messages[error] || '修改失败，原账单已保留，请重试';
+        if (result) {
+          this.reviewValues = { ...result.values };
+          const changes = [...new Set(result.changedFields.map(key => labels[key]))].filter(Boolean);
+          message = [changes.length ? '已修改：' + changes.join('、') : '没有修改字段', ...result.warnings].join('；');
+        }
+        this.setData({ reviewBusy: busy, reviewMessage: message, ...(result ? { bill: presentBill(this.reviewValues) } : {}) });
+      },
+    });
     this.lastCaptureInput = null; this.keySequence = 0; this.pendingKeyAction = null;
     this.photoDisplay = createPhotoDisplayController({
       decode: photo => {
@@ -36,6 +53,7 @@ export default {
       recognize: (photo, options) => this.receiptApi.recognize(photo, options),
       notify: ({ state, busy, result, error }) => {
         if (this.pageClosed) return;
+        if (result) this.reviewValues = { ...result.values, accountId: '', accountName: '' };
         const messages = { AUTH_STORAGE_UNAVAILABLE: '当前运行时不支持保存设备授权，请升级运行时', AUTH_STORAGE_FAILED: '设备授权存储失败，请重试', RECEIPT_ARCHIVE_FAILED: '原图保存失败，请重试', AUTH_REQUIRED: '设备授权已失效，请重试并在手机授权', DEVICE_ACCESS_DENIED: '已拒绝授权，可重试重新申请', DEVICE_CODE_EXPIRED: '授权码已过期，请重试', DEVICE_CODE_USED: '授权码已使用，请重试', DEVICE_RATE_LIMIT: '授权请求过于频繁，请稍后重试', DEVICE_ENDPOINT_UNAVAILABLE: '后端尚未部署设备授权接口', RATE_LIMITED: '识别请求过于频繁，请稍后重试', TIMEOUT: '识别超时，请重试', INVALID_RESULT: '识别结果无效，请重试', NETWORK_ERROR: '连接失败，请检查网络后重试', BACKEND_UNAVAILABLE: '识别服务暂不可用，请稍后重试', BACKEND_NOT_CONFIGURED: '后端尚未配置识别服务', BACKEND_REDIRECT: '后端地址发生跳转，请检查 HTTPS 配置', BACKEND_CONFIG: '后端 HTTPS 地址配置无效', RUNTIME_UNSUPPORTED: '当前运行时不支持识别网络接口', IMAGE_TOO_LARGE: '照片过大，请重新拍摄', IMAGE_ENCODING_UNSUPPORTED: '当前运行时不支持照片格式转换', IMAGE_ENCODING_FAILED: '照片转换失败，请重新拍摄', RECEIPT_NOT_FOUND: '未识别到账单，请重新拍摄', RECOGNITION_FAILED: '识别失败，请重试' };
         this.setData({ recognitionState: state, ...(!busy ? { authorizationVisible: false, authorizationCode: '', authorizationUrl: '' } : {}), billVisible: state === 'recognized', receiptId: result?.receiptId || '', bill: result ? presentBill(result.values) : {}, busy: busy || !!this.controller?.snapshot().busy || this.captureActionBusy, canRetry: state === 'failed', ...(state === 'recognizing' ? { message: '正在识别账单…' } : state === 'failed' ? { message: messages[error] || messages.RECOGNITION_FAILED } : state === 'recognized' ? { message: '' } : {}) });
       },
@@ -137,10 +155,12 @@ export default {
   },
   allowCameraAction() { return !this.pageClosed && !this.pageHidden; },
   onHide() {
+    this.voice?.cancel(); this.setData({ reviewBusy: false });
     this.pageHidden = true; this.wantsPreview = false; this.pendingKeyAction = null; this.lastCaptureInput = null; this.captureRun++; this.captureActionBusy = false;
     this.cancelBinding(); this.recognition?.cancel(); this.controller?.discard('hidden'); this.photoDisplay?.clear();
   },
   onUnload() {
+    this.voice?.close();
     this.pageHidden = true; this.pageClosed = true; this.wantsPreview = false; this.pendingKeyAction = null; this.lastCaptureInput = null; this.captureRun++; this.captureActionBusy = false;
     this.cancelBinding(); this.recognition?.close(); this.receiptApi?.close(); this.controller?.close('unload'); this.photoDisplay?.close();
   },
@@ -188,6 +208,10 @@ export default {
     event?.preventDefault?.(); event?.stopPropagation?.();
     if (!this.allowCameraAction() || !this.data.billVisible || this.data.reviewBusy || !['voice', 'draft', 'confirm'].includes(action)) return false;
     if (!this.acceptCaptureInput(event, 'review-' + action)) return false;
+    if (action === 'voice') {
+      this.setData({ selectedAction: action });
+      return this.voice.run(this.reviewValues || {});
+    }
     this.setData({ selectedAction: action, reviewMessage: '此操作将在后续步骤接通，当前账单已保留' });
     return false;
   },

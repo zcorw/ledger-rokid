@@ -6,6 +6,7 @@ import { createPhotoDisplayController } from '../aiui/lib/photo-display.js';
 import { createReceiptRecognitionController } from '../aiui/lib/receipt-recognition.js';
 import { createReceiptCredentialStore } from '../aiui/lib/receipt-credential-store.js';
 import { presentBill } from '../aiui/lib/bill-presentation.js';
+import { createVoiceReview } from '../aiui/lib/voice-review.js';
 const source = await readFile(new URL('../aiui/pages/capture/index.ink', import.meta.url), 'utf8');
 const script = source.match(/<script setup>([\s\S]*?)<\/script>/)[1].replace(/^import .*;$/gm, '').replace('export default', 'return');
 const deferred = () => { let resolve; const promise = new Promise(yes => { resolve = yes; }); return { promise, resolve }; };
@@ -30,7 +31,7 @@ function page(overrides = {}) {
     createCanvasContext(id) { assert.equal(id, 'captured-photo'); return { clearRect: (...args) => canvasCalls.push(['clear', ...args]), drawImage: (...args) => canvasCalls.push(['draw', ...args]), flush: () => canvasCalls.push(['flush']) }; },
   };
   const recognize = async (photo, options) => { recognitions++; return overrides.recognize ? overrides.recognize(photo, options) : result(); };
-  const p = new Function('wx', 'createViewfinderController', 'createPhotoDisplayController', 'createReceiptRecognitionController', 'createReceiptApi', 'createReceiptCredentialStore', 'presentBill', 'globalThis', 'Date', 'console', script)(wx, createViewfinderController, createPhotoDisplayController, createReceiptRecognitionController, options => ({ authorize: callOptions => { overrides.authorization?.(options.notifyAuthorization); return overrides.authorize ? overrides.authorize(callOptions) : Promise.resolve(true); }, recognize, close: () => overrides.close?.() }), createReceiptCredentialStore, presentBill, environment, { now: () => time }, overrides.hostConsole || { log() {} });
+  const p = new Function('wx', 'createViewfinderController', 'createPhotoDisplayController', 'createReceiptRecognitionController', 'createReceiptApi', 'createReceiptCredentialStore', 'presentBill', 'createVoiceReview', 'globalThis', 'Date', 'console', script)(wx, createViewfinderController, createPhotoDisplayController, createReceiptRecognitionController, options => ({ authorize: callOptions => { overrides.authorization?.(options.notifyAuthorization); return overrides.authorize ? overrides.authorize(callOptions) : Promise.resolve(true); }, recognize, close: () => overrides.close?.() }), createReceiptCredentialStore, presentBill, options => createVoiceReview({ ...options, speechFactory: () => { throw new Error('SPEECH_UNSUPPORTED'); } }), environment, { now: () => time }, overrides.hostConsole || { log() {} });
   p.setData = function(value) { updates++; Object.assign(this.data, value); }; p.onLoad();
   return { p, events, revoked, decoded, canvasCalls, stream, advance(ms) { time += ms; }, counts: () => ({ requests, shots, recognitions, stops, updates }) };
 }
@@ -43,9 +44,9 @@ test('opening the agent automatically previews after ready, without exposing a p
   r.p.onReady(); r.p.onShow(); assert.equal(r.counts().requests, 1); assert.equal(r.counts().shots, 0);
 });
 
-test('the agent launches directly into capture and requests no microphone permission', async () => {
+test('the agent launches into capture and declares permission for explicit voice input', async () => {
   const config = JSON.parse(await readFile(new URL('../aiui/app.json', import.meta.url), 'utf8'));
-  assert.deepEqual(config.pages, ['pages/capture/index']); assert.deepEqual(config.permissions, ['CAMERA']);
+  assert.deepEqual(config.pages, ['pages/capture/index']); assert.deepEqual(config.permissions, ['CAMERA', 'RECORD_AUDIO']);
 });
 
 test('one explicit activation captures, recognizes and shows the bill without another button', async t => {

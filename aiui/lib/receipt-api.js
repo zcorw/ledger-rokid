@@ -135,6 +135,13 @@ export function createReceiptApi({ fetchImpl = (...args) => globalThis.fetch(...
   }
 
   return {
+    async correct(values, transcript, { signal } = {}) {
+      const token = await authorized(signal); active(signal);
+      const response = await request('/review-correction', { ...json({ values, transcript }, signal), timeout: 55_000, headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token } });
+      if (response.status === 401) { forget(); throw error('AUTH_REQUIRED'); }
+      if (response.status !== 200) throw error(response.body?.error?.code || 'CORRECTION_FAILED');
+      return response.body;
+    },
     async authorize({ signal } = {}) {
       await authorized(signal); active(signal);
       return true;

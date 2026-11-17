@@ -20,6 +20,13 @@ test('presentation keeps all bill content and does not change the underlying val
   const original = { ...values }, bill = presentBill(values);
   assert.deepEqual(values, original); assert.equal(bill.category, '餐饮');
   for (const key of ['merchant', 'expenseDate', 'note']) assert.equal(bill[key], values[key]);
-  assert.equal(presentBill({}).amountText, '—'); assert.equal(presentBill({}).category, '');
+  assert.equal(presentBill({}).amountText, ''); assert.equal(presentBill({}).category, '');
   assert.equal(presentBill({ category: 'constructor' }).category, 'constructor');
+});
+
+test('unconfirmed receipt fields stay empty without placeholder amounts or invented content', () => {
+  const bill = presentBill({ amount: '42.00' });
+  assert.equal(bill.amountText, '42.00');
+  for (const field of ['currencySymbol', 'merchant', 'expenseDate', 'category', 'note']) assert.equal(bill[field], '');
+  assert.equal(presentBill({}).amountText, '');
 });

@@ -16,7 +16,7 @@ export const billFieldLabels = { expenseDate: '日期', amount: '金额', curren
 export function presentBill(values = {}) {
   const text = key => typeof values[key] === 'string' ? values[key] : '';
   const amount = text('amount');
-  let amountText = amount || '—';
+  let amountText = amount;
   if (/^\d+(\.\d+)?$/.test(amount)) {
     const [integer, decimals] = amount.split('.');
     amountText = integer.replace(/^0+(?=\d)/, '').replace(/\B(?=(\d{3})+(?!\d))/g, ',')

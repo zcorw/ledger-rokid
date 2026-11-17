@@ -27,6 +27,10 @@ is `单击拍照，自动识别账单`. There is no open-preview button, test he
 action selector or separate synthetic-review shortcut. A tap or Enter activation
 captures once, displays the photo while recognition runs, and then shows only
 the bill content with a large amount and currency symbol.
+The result uses a separate full-height scroll view matching preview/index.html,
+without the camera container's flex sizing. Unknown fields, including amount,
+remain empty. A candidate containing only an amount legitimately shows only that
+amount; device acceptance must also check a candidate with known merchant/date.
 
 Recognition uses the real Flow Ledger 2 HTTPS API after explicit phone approval.
 New receipt-only grants remain valid until revoked or the account password changes;

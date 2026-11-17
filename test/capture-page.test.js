@@ -72,6 +72,13 @@ test('the native photo stays visible during recognition with its original bytes 
   recognition.resolve(result()); assert.equal(await pending, true); assert.equal(r.p.data.billVisible, true); assert.equal(r.p.data.photoVisible, false);
 });
 
+test('a real candidate with only an amount shows no synthetic date, merchant, currency or category', async t => {
+  const r = page({ recognize: async () => ({ status: 200, body: { amount: '42.00', expenseDate: '', currencyCode: '', merchant: '', warnings: ['unconfirmed'] } }) });
+  t.after(() => r.p.onUnload()); await r.p.onReady(); assert.equal(await r.p.capture(), true);
+  assert.equal(r.p.data.billVisible, true); assert.equal(r.p.data.bill.amountText, '42.00');
+  for (const field of ['currencySymbol', 'merchant', 'expenseDate', 'category', 'note']) assert.equal(r.p.data.bill[field], '');
+});
+
 test('the shutter stays inactive while the automatic preview is still acquiring a stream', async t => {
   const acquisition = deferred(); const r = page({ requestStream: () => acquisition.promise }); t.after(() => r.p.onUnload());
   const opening = r.p.onReady(); assert.equal(await r.p.capture(), false); r.p.onKeyUp(key('Enter')); assert.equal(r.counts().shots, 0);

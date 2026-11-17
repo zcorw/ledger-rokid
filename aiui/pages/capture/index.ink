@@ -228,13 +228,14 @@ export default {
   },
 };
 </script>
-<page><view class="screen">
-<scroll-view class="bill-scroll" scroll-y="true" ink:if="{{billVisible}}"><view class="bill">
+<page>
+<scroll-view class="bill-screen" scroll-y="true" ink:if="{{billVisible}}"><view class="bill">
   <view class="total"><text class="currency">{{bill.currencySymbol}}</text><text class="amount" style="font-size:{{bill.amountFontSize}}px">{{bill.amountText}}</text></view>
   <text class="merchant" ink:if="{{bill.merchant}}">{{bill.merchant}}</text>
   <view class="details"><text>{{bill.expenseDate}}</text><text>{{bill.category}}</text></view>
   <text class="note" ink:if="{{bill.note}}">{{bill.note}}</text>
 </view></scroll-view>
+<view class="{{billVisible ? 'screen screen-hidden' : 'screen'}}">
 <view class="authorization" ink:if="{{authorizationVisible}}"><text class="hint">请先绑定知产</text><text class="authorization-url">{{authorizationUrl}}</text><text class="authorization-code">{{authorizationCode}}</text><text class="hint">手机打开网址，核对绑定码并允许识别</text></view>
 <view class="preview-frame" ink:if="{{bindingState === 'bound' && !billVisible && !photoVisible && !authorizationVisible}}" bindtap="capture"><video ink:for="{{previewItems}}" ink:key="id" data-session="{{item.id}}" src="{{item.src}}" class="viewfinder" autoplay="true" muted="true" object-fit="contain" bindplaying="previewPlaying" binderror="previewError"></video></view>
 <canvas id="captured-photo" width="400" height="180" class="{{photoVisible && !billVisible && !authorizationVisible ? 'photo-canvas' : 'photo-canvas photo-hidden'}}"></canvas>
@@ -245,6 +246,7 @@ export default {
 </view></page>
 <style>
 .screen { width:100%; height:100%; box-sizing:border-box; padding:12px; background-color:#000; color:#40ff5e; display:flex; flex-direction:column; justify-content:center; }
+.screen-hidden { height:0; padding:0; overflow:hidden; visibility:hidden; }
 .preview-frame { width:400px; max-width:100%; height:180px; flex-shrink:0; align-self:center; }
 .viewfinder { width:100%; height:100%; }
 .photo-canvas { width:400px; max-width:100%; height:180px; flex-shrink:0; align-self:center; }
@@ -254,8 +256,8 @@ export default {
 .authorization { display:flex; flex-direction:column; align-items:center; }
 .authorization-url { font-size:16px; text-align:center; margin-top:4px; overflow-wrap:anywhere; }
 .authorization-code { font-size:40px; font-weight:700; margin-top:8px; }
-.bill-scroll { flex:1; min-height:0; width:100%; }
-.bill { display:flex; flex-direction:column; gap:8px; padding:4px; }
+.bill-screen { width:100%; height:100%; box-sizing:border-box; padding:16px; background-color:#000; color:#40ff5e; font-size:18px; }
+.bill { display:flex; flex-direction:column; gap:8px; margin-bottom:16px; }
 .total { display:flex; flex-direction:row; flex-wrap:wrap; align-items:baseline; gap:4px; }
 .currency { font-size:28px; font-weight:600; }
 .amount { font-weight:700; line-height:1.08; max-width:100%; overflow-wrap:anywhere; }

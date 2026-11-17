@@ -26,5 +26,5 @@ test('the native result keeps the whole bill visible after confirmation and leav
  assert.equal(page.data.bill.merchant,syntheticReceipt.merchant);assert.equal(page.data.bill.expenseDate,syntheticReceipt.expenseDate);assert.equal(page.data.bill.category,'餐饮');
  page.preview();page.confirm();assert.equal(page.data.state,'confirmed');assert.equal(page.data.bill.amountText,'1,234');assert.deepEqual(page.actions(),[]);
  let prevented=false;page.onKeyUp({code:'Enter',preventDefault(){prevented=true;}});assert.equal(prevented,false);assert.equal(page.data.state,'confirmed');
- page.onHide();assert.equal(page.data.bill.amountText,'—');assert.equal(page.data.bill.merchant,'');assert.equal(page.data.bill.currencySymbol,'');
+ page.onHide();assert.equal(page.data.bill.amountText,'');assert.equal(page.data.bill.merchant,'');assert.equal(page.data.bill.currencySymbol,'');
 });

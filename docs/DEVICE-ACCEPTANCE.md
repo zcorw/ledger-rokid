@@ -1,64 +1,118 @@
-# Camera capability spike
+# Camera and agent flow acceptance
 
-This is an AIUI source prototype, not an APK, deployable production app, OCR implementation, or completed device acceptance. No server, credentials, network permission, persistent storage, or automatic billing submission is included. All receipts used for testing must be synthetic.
+## Reported device results
 
-## Runtime contract
+The glasses returned an ArrayBuffer of 965298 bytes with MIME type image/webp.
+The original JPEG/PNG-only allowlist rejected that result; accepting WebP fixed
+the still-photo path. The user later reported that the camera tests passed.
+Device model, firmware and complete AIUI version were not recorded.
 
-Official reference: https://github.com/yodaos-project/AIUI/blob/cf2908bf95359bfa76a04d0f6abde9313b6c92f1/documentation/3-api/media/media-capture.en-US.md
+The device reported create-image-capture/unsupported, so live preview uses
+getUserMedia, a MediaStream object URL and a native video component. It does not
+require ImageCapture or Canvas. The user saw moving video followed by our former
+wait-video timeout: a missing or unrecognized playing event was not evidence of
+failed playback. That callback is now optional diagnostic information, and no
+playback-callback timeout closes a working preview.
 
-The application must run in a supported native AIUI runtime with `_blank` lifetime and CAMERA permission. The documented wx camera factory may be unavailable on wasm32 or other unsupported runtimes. Declaring CAMERA does not grant consent. Capture only follows a visible button press, with system preview requested. High quality / telephoto are documented options, not measured framing guarantees.
+These reports cover the earlier camera/display work. The new automatic entry
+and real recognition/persistent authorization flow still needs target-device verification.
 
-Native capture cancellation is not documented: clearing or hiding invalidates the result, but another native capture is blocked until the original promise settles. The controller holds at most one encoded photo in volatile memory. Clearing drops references; this is not guaranteed secure memory erasure. Camera context has no documented manual disposal method. No invented release API is called.
+## Current flow
 
-## Local verification
+Opening the agent goes directly to the capture page and checks its saved binding.
+An unbound device shows the phone binding URL and code before requesting the
+camera. After approval, or when a saved binding exists, a live viewfinder opens
+automatically. The only normal caption below it
+is `单击拍照，自动识别账单`. There is no open-preview button, test heading,
+action selector or separate synthetic-review shortcut. A tap or Enter activation
+captures once, displays the photo while recognition runs, and then shows only
+the bill content with a large amount and currency symbol.
+The result uses a separate full-height scroll view matching preview/index.html,
+without the camera container's flex sizing. Unknown fields, including amount,
+remain empty. A candidate containing only an amount legitimately shows only that
+amount; device acceptance must also check a candidate with known merchant/date.
 
-Use Node.js 22 or newer: `npm run check && npm test`. No dependencies are needed. Tests cover successful capture, missing native API, permission failure, malformed response, cancellation, duplicate requests and teardown. The page script is syntax-checked but the actual Ink renderer and native module are not exercised. GitHub Actions repeats these checks. Passing Node CI is not hardware acceptance.
+Recognition uses the real Flow Ledger 2 HTTPS API after explicit phone approval.
+New receipt-only grants remain valid until revoked or the account password changes;
+the credential is stored in Agent-isolated native storage and restored after exit
+or device restart. Photos and bill contents are never persisted. Voice editing
+and accounting submission remain deferred. See [agent flow](AGENT-FLOW.md).
 
-## Required device acceptance (not yet executed)
+## Native contract and resource handling
 
-Record device model, firmware, AIUI version and launch mechanism. Load `aiui/` using the official supported development process for that target, with `_blank`; this repository does not guess a packaging command.
+Official references:
 
-1. Deny camera consent: no capture/upload; failure is visible and retry is possible.
-2. Grant consent and capture a synthetic receipt: system preview appears, encoded bytes arrive, and framing/readability are inspected using a separately reviewed local preview/OCR step. Current UI only displays byte count, not an image preview.
-3. Test dim lighting, long receipt and large print. Record measured image dimensions/MIME and readability; do not assume documented nominal resolution matches hardware.
-4. Repeated taps do not create concurrent capture. Cancel/hide during capture discards late output. Return and retry after native capture settles.
-5. Exit/reopen and repeat at least 20 times: no camera lock, stale photo, or unexpected memory growth. Confirm platform camera privacy indicators turn off.
-6. Verify no outgoing traffic and no receipt is persisted.
+- [Media capture](https://open.rokid.com/aiui/api/media/media-capture?lang=zh-CN&version=0.19.0)
+- [Native stream preview example](https://github.com/yodaos-project/AIUI/blob/c490609a5018152aef52ebcee912e4534e4f4bca/samples/capabilities/pages/scanner/index.ink)
+- [Photo decoding example](https://github.com/yodaos-project/AIUI/blob/c490609a5018152aef52ebcee912e4534e4f4bca/samples/capabilities/pages/image_apis/index.ink)
 
-The Zhixu camera task stays in progress until native runtime and device checks pass. OCR, editable review, authentication/privacy, and confirmed idempotent submission are separate unimplemented tasks. A browser mock cannot prove the native camera contract.
+The app declares CAMERA permission. The manifest does not grant operating-system
+consent. AIUI documents media access after entering `_blank`, disables media
+capture for `app.config.lifetime === 'cut'`, and may omit the wx camera factory
+on unsupported runtimes. This device experiment has no hostTarget gate; removing
+that gate alone does not establish card/full-screen camera support.
 
-## Capture entry and device navigation
+Automatic preview is restricted to a ready, visible page with a saved binding.
+Leaving during binding aborts the request; a late approval cannot open the camera.
+Binding failures keep the camera closed and offer a retry. Exposure still requires
+an explicit activation. Direction, system back and voice wakeup stay with the
+host; Backspace and Escape clear resources before the normal return action.
+Repeated key events and duplicate activation callbacks do not cause another
+exposure. Stale playing/error events cannot affect a later preview session.
 
-The previous page exposed tap buttons but did not explain that the conversation card
-and full-screen page are different interaction contexts. This is a confirmed guidance
-gap, not a confirmed diagnosis of a particular device failure.
+Shutter confirmation stops all preview tracks and revokes the stream URL before
+acquiring the wx still-photo camera, with enableSystemPreview disabled. JPEG,
+PNG and WebP bytes and their MIME type are preserved in memory. Native exposure
+is not abortable: cancellation invalidates its result, and another physical
+capture waits for the original call to settle. A stream arriving after a cancelled
+permission request is stopped immediately.
 
-The official AIUI documentation at commit
-`cf2908bf95359bfa76a04d0f6abde9313b6c92f1` describes:
-- [Target](https://github.com/yodaos-project/AIUI/blob/cf2908bf95359bfa76a04d0f6abde9313b6c92f1/documentation/1-framework/open-agent-format/target.en-US.md):
-  double-tap the conversation card to enter the full-screen `_blank` container.
-- [Events](https://github.com/yodaos-project/AIUI/blob/cf2908bf95359bfa76a04d0f6abde9313b6c92f1/documentation/1-framework/open-agent-format/page-events.en-US.md):
-  page `onKeyUp` receives `Enter`, `ArrowUp`, and `ArrowDown`; use
-  `preventDefault()` when taking over the host's built-in action.
-- Camera access requires `_blank`; declaring CAMERA does not grant OS permission.
+The frozen photo is decoded through Blob/createImageBitmap and drawn into the
+mounted 400 by 180 canvas using wx.createCanvasContext('captured-photo'), followed
+by flush(). It is centered and scaled to fit without cropping. Each decoded bitmap
+is closed after drawing. A display failure does not turn a successful exposure
+into a camera failure. The original photo and canvas are cleared after the bill
+appears. Cancel, hide and unload invalidate pending recognition and decoding;
+late results never restore an old bill or photo. Returning opens a fresh preview.
 
-The updated page shows entry instructions before the status text. Once the host
-reports `_blank`, direction keys switch between capture and clear/cancel, and
-Enter executes the displayed selection. Backspace, GlobalHook and voice wakeup
-are not intercepted. Repeated key events are ignored. Tap buttons remain available.
-A reported inline target blocks capture and returning to inline invalidates pending
-image results. If an older host never reports the target, key handling stays with
-the host and tap capture still relies on the native API's target/permission checks.
+Camera failures retain the failing stage and native code/message in the display
+and diagnostic logs. Logs never include image bytes. Recognition failure displays
+an error and allows retry with the same photo, without an extra exposure.
 
-Acceptance on the target glasses must check:
-1. Open the current draft; verify the entry hint is visible in the card.
-2. Double-tap into full-screen and verify the hint changes to full-screen controls.
-3. Move selection and confirm capture with a synthetic receipt, then clear it.
-4. Verify one activation does not cause duplicate captures, and cancel while busy.
-5. Verify returning to the card discards the image; Backspace/voice still behave normally.
-6. Record the AIUI version and whether target/key callbacks actually arrive. If the
-   hint never changes, distinguish an old imported build from missing host callbacks.
+## Target-device checklist
 
-The Node page tests execute the actual exported callbacks with a mocked controller.
-They do not compile the Ink layout, emulate focus routing, grant camera permission,
-or prove physical-device capture. No OCR contract or receipt upload is added.
+1. On an unbound device, open from the card and full-screen entry separately.
+   Verify the binding URL/code appears first with no camera access. Approve on
+   the phone, then verify preview opens automatically and the short caption fits
+   below it without scrolling. Reopen with a saved binding: no new code is shown.
+2. Leave preview open beyond 10 seconds. Verify moving frames remain visible
+   and no exposure occurs until a separate tap/confirmation.
+3. Tap once. Verify one exposure, the frozen photo and recognition status, then
+   the actual returned bill with a large amount
+   and currency symbol. Confirm amount, date, merchant and currency against the receipt.
+4. Repeat taps and key callbacks during exposure and recognition. Verify one
+   exposure and one recognition operation. Inspect native framing/readability
+   separately because preview and telephoto still framing may differ.
+5. Exit/background during binding, permission acquisition, exposure and recognition. Return
+   and verify a fresh preview with no stale image or bill. Camera privacy
+   indicators must turn off on exit.
+6. Deny permission and test unavailable camera/video APIs. Verify a visible error,
+   retry behavior and no unconfirmed exposure or fake success on a failure path.
+7. Repeat exit/reopen at least 20 times and inspect camera locks and memory growth.
+   Verify HTTPS traffic goes only to the configured backend; no photo or receipt
+   persists locally. The saved credential must survive Agent exit and device restart
+   without another code. Test binding denial/expiry and retry before camera access.
+   Test phone revocation: a rejected recognition clears the photo and requires
+   binding again before reopening the camera. Exit must cancel a pending
+   authorization/upload. Deploy both sides and run migration first.
+8. Record device, firmware, AIUI version and actual key callbacks. Rebuild and sync
+   the latest resource package before comparing results.
+
+## Local checks
+
+Use Node.js 22 or newer: `npm run check && npm test`. Tests run the real page
+callbacks and controllers with mocked camera/stream/decoder/recognition APIs.
+They cover automatic start, duplicate activation, permission/camera errors,
+recognition retries, cancellation, late results, image cleanup and bill fields.
+They do not compile Ink, grant permission or prove native rendering and input.
+The independent browser review/chain tests are not AIUI emulators.

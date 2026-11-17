@@ -48,13 +48,10 @@ Storage failures are shown explicitly; no silent memory-only fallback is used.
 The adapter uses the [official AIUI Agent-isolated storage APIs](https://github.com/yodaos-project/AIUI/blob/c490609a5018152aef52ebcee912e4534e4f4bca/documentation/3-api/storage-api.md).
 The normal web cookie is neither copied nor sent by the glasses.
 
-JPEG/PNG originals up to 8 MiB pass through. Original WebP is converted via
-Blob/createImageBitmap/offscreen Canvas.convertToBlob to JPEG (PNG fallback is
-accepted), with white transparency and longest side <=4096. Never upload the
+JPEG/PNG/WebP originals up to 8 MiB pass through unchanged. The server archives the original bytes and candidate in PostgreSQL, then normalizes a separate copy for OCR. X-Receipt-Id carries the archive UUID outside the existing five-field candidate JSON. The recognition controller and page retain this identifier; old servers without the header remain compatible. Never upload the
 400x180 photo-display canvas. Responses are streamed with a 16 KiB bound before
 JSON parsing. Requests time out after 15 seconds (55 for OCR); hiding/exiting
-aborts polling and upload. No mock fallback, provider key or photo persistence
-is present. Warnings are not rendered as bill content; missing fields stay blank.
+aborts polling and upload. No mock fallback, provider key or local photo persistence is present. Cancelling does not delete originals already received and saved on the server. Warnings are not rendered as bill content; missing fields stay blank.
 
 Both backend/frontend deployment and target-device acceptance remain required.
 Local tests use synthetic responses, no paid OCR or real financial writes.

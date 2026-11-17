@@ -10,6 +10,17 @@ function memoryStore(initial = null) {
   return { read: () => value, write: (resource, next) => { value = next; }, remove: () => { value = null; } };
 }
 const saved = (extra = {}) => JSON.stringify({ version: 1, resource: prefix, accessToken: 's'.repeat(43), scope: 'receipt:recognize', expiresAt: null, ...extra });
+test('native WebP bytes are uploaded unchanged and the archive identifier stays outside the candidate', async () => {
+  const raw = new Uint8Array([82, 73, 70, 70, 1, 2, 3]).buffer;
+  const id = 'e4f82d1a-00d4-40d3-a25c-302f55d1f331';
+  let upload;
+  const api = createReceiptApi({ credentialStore: memoryStore(saved()), fetchImpl: async (url, options) => {
+    upload = options; return json(candidate, 200, { 'X-Receipt-Id': id });
+  } });
+  const response = await api.recognize({ data: raw, mimeType: 'image/webp' });
+  assert.equal(upload.body, raw); assert.equal(upload.headers['Content-Type'], 'image/webp');
+  assert.equal(response.receiptId, id); assert.deepEqual(response.body, candidate);
+});
 function fixture(overrides = {}) {
   let clock = Date.parse('2026-11-16T00:00:00Z'), pending = 1, starts = 0;
   const calls = [], states = [], encoded = [];

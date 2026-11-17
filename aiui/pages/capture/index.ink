@@ -10,7 +10,7 @@ import { createReceiptApi } from '../../lib/receipt-api.js';
 import { createReceiptCredentialStore } from '../../lib/receipt-credential-store.js';
 import { presentBill } from '../../lib/bill-presentation.js';
 export default {
-  data: { busy: false, bindingState: 'checking', captureState: 'idle', recognitionState: 'idle', previewItems: [], photoVisible: false, photoMessage: '', billVisible: false, bill: {}, authorizationVisible: false, authorizationCode: '', authorizationUrl: '', message: '正在检查绑定…', canRetry: false, entryHint: '单击拍照，自动识别账单' },
+  data: { busy: false, bindingState: 'checking', captureState: 'idle', recognitionState: 'idle', previewItems: [], photoVisible: false, photoMessage: '', billVisible: false, bill: {}, receiptId: '', authorizationVisible: false, authorizationCode: '', authorizationUrl: '', message: '正在检查绑定…', canRetry: false, entryHint: '单击拍照，自动识别账单' },
   onLoad() {
     this.pageHidden = false; this.pageClosed = false; this.pageReady = false;
     this.wantsPreview = false; this.previewStarting = false; this.captureActionBusy = false; this.captureRun = 0;
@@ -36,8 +36,8 @@ export default {
       recognize: (photo, options) => this.receiptApi.recognize(photo, options),
       notify: ({ state, busy, result, error }) => {
         if (this.pageClosed) return;
-        const messages = { AUTH_STORAGE_UNAVAILABLE: '当前运行时不支持保存设备授权，请升级运行时', AUTH_STORAGE_FAILED: '设备授权存储失败，请重试', AUTH_REQUIRED: '设备授权已失效，请重试并在手机授权', DEVICE_ACCESS_DENIED: '已拒绝授权，可重试重新申请', DEVICE_CODE_EXPIRED: '授权码已过期，请重试', DEVICE_CODE_USED: '授权码已使用，请重试', DEVICE_RATE_LIMIT: '授权请求过于频繁，请稍后重试', DEVICE_ENDPOINT_UNAVAILABLE: '后端尚未部署设备授权接口', RATE_LIMITED: '识别请求过于频繁，请稍后重试', TIMEOUT: '识别超时，请重试', INVALID_RESULT: '识别结果无效，请重试', NETWORK_ERROR: '连接失败，请检查网络后重试', BACKEND_UNAVAILABLE: '识别服务暂不可用，请稍后重试', BACKEND_NOT_CONFIGURED: '后端尚未配置识别服务', BACKEND_REDIRECT: '后端地址发生跳转，请检查 HTTPS 配置', BACKEND_CONFIG: '后端 HTTPS 地址配置无效', RUNTIME_UNSUPPORTED: '当前运行时不支持识别网络接口', IMAGE_TOO_LARGE: '照片过大，请重新拍摄', IMAGE_ENCODING_UNSUPPORTED: '当前运行时不支持照片格式转换', IMAGE_ENCODING_FAILED: '照片转换失败，请重新拍摄', RECEIPT_NOT_FOUND: '未识别到账单，请重新拍摄', RECOGNITION_FAILED: '识别失败，请重试' };
-        this.setData({ recognitionState: state, ...(!busy ? { authorizationVisible: false, authorizationCode: '', authorizationUrl: '' } : {}), billVisible: state === 'recognized', bill: result ? presentBill(result.values) : {}, busy: busy || !!this.controller?.snapshot().busy || this.captureActionBusy, canRetry: state === 'failed', ...(state === 'recognizing' ? { message: '正在识别账单…' } : state === 'failed' ? { message: messages[error] || messages.RECOGNITION_FAILED } : state === 'recognized' ? { message: '' } : {}) });
+        const messages = { AUTH_STORAGE_UNAVAILABLE: '当前运行时不支持保存设备授权，请升级运行时', AUTH_STORAGE_FAILED: '设备授权存储失败，请重试', RECEIPT_ARCHIVE_FAILED: '原图保存失败，请重试', AUTH_REQUIRED: '设备授权已失效，请重试并在手机授权', DEVICE_ACCESS_DENIED: '已拒绝授权，可重试重新申请', DEVICE_CODE_EXPIRED: '授权码已过期，请重试', DEVICE_CODE_USED: '授权码已使用，请重试', DEVICE_RATE_LIMIT: '授权请求过于频繁，请稍后重试', DEVICE_ENDPOINT_UNAVAILABLE: '后端尚未部署设备授权接口', RATE_LIMITED: '识别请求过于频繁，请稍后重试', TIMEOUT: '识别超时，请重试', INVALID_RESULT: '识别结果无效，请重试', NETWORK_ERROR: '连接失败，请检查网络后重试', BACKEND_UNAVAILABLE: '识别服务暂不可用，请稍后重试', BACKEND_NOT_CONFIGURED: '后端尚未配置识别服务', BACKEND_REDIRECT: '后端地址发生跳转，请检查 HTTPS 配置', BACKEND_CONFIG: '后端 HTTPS 地址配置无效', RUNTIME_UNSUPPORTED: '当前运行时不支持识别网络接口', IMAGE_TOO_LARGE: '照片过大，请重新拍摄', IMAGE_ENCODING_UNSUPPORTED: '当前运行时不支持照片格式转换', IMAGE_ENCODING_FAILED: '照片转换失败，请重新拍摄', RECEIPT_NOT_FOUND: '未识别到账单，请重新拍摄', RECOGNITION_FAILED: '识别失败，请重试' };
+        this.setData({ recognitionState: state, ...(!busy ? { authorizationVisible: false, authorizationCode: '', authorizationUrl: '' } : {}), billVisible: state === 'recognized', receiptId: result?.receiptId || '', bill: result ? presentBill(result.values) : {}, busy: busy || !!this.controller?.snapshot().busy || this.captureActionBusy, canRetry: state === 'failed', ...(state === 'recognizing' ? { message: '正在识别账单…' } : state === 'failed' ? { message: messages[error] || messages.RECOGNITION_FAILED } : state === 'recognized' ? { message: '' } : {}) });
       },
     });
     this.controller = createViewfinderController({
@@ -236,7 +236,7 @@ export default {
   <text class="note" ink:if="{{bill.note}}">{{bill.note}}</text>
 </view></scroll-view>
 <view class="{{billVisible ? 'screen screen-hidden' : 'screen'}}">
-<view class="authorization" ink:if="{{authorizationVisible}}"><text class="hint">请先绑定知产</text><text class="authorization-url">{{authorizationUrl}}</text><text class="authorization-code">{{authorizationCode}}</text><text class="hint">手机打开网址，核对绑定码并允许识别</text></view>
+<view class="authorization" ink:if="{{authorizationVisible}}"><text class="hint">请先绑定知产</text><text class="authorization-url">{{authorizationUrl}}</text><text class="authorization-code">{{authorizationCode}}</text><text class="hint">手机核对绑定码，允许识别并保存原图</text></view>
 <view class="preview-frame" ink:if="{{bindingState === 'bound' && !billVisible && !photoVisible && !authorizationVisible}}" bindtap="capture"><video ink:for="{{previewItems}}" ink:key="id" data-session="{{item.id}}" src="{{item.src}}" class="viewfinder" autoplay="true" muted="true" object-fit="contain" bindplaying="previewPlaying" binderror="previewError"></video></view>
 <canvas id="captured-photo" width="400" height="180" class="{{photoVisible && !billVisible && !authorizationVisible ? 'photo-canvas' : 'photo-canvas photo-hidden'}}"></canvas>
 <text class="hint" ink:if="{{!billVisible && !authorizationVisible}}">{{message || entryHint}}</text>

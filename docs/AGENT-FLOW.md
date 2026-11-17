@@ -25,9 +25,7 @@ exit or device restart. This local check does not contact the backend when a val
 saved grant exists. If recognition returns 401/403, the grant and photo are cleared
 and the next retry binds again before opening the camera.
 Phone revocation or an account password change invalidates it; clearing Agent
-data requires authorization again. Original WebP
-photos are converted with an offscreen Canvas to JPEG (longest side <=4096),
-never from the display thumbnail. Upload and response sizes are bounded, requests
+data requires authorization again. Original JPEG/PNG/WebP bytes are uploaded unchanged and archived with the candidate in the VPS database. A separate server-side copy is normalized for recognition; the display thumbnail is never uploaded. The X-Receipt-Id header links the result to the stored original. Upload and response sizes are bounded, requests
 use HTTPS without cookies or redirects, and failure never generates a sample bill.
 The agent does not submit expenses. Both backend migration/API and phone UI must
 be deployed before real recognition works. See [contract](OCR-CONTRACT.md).

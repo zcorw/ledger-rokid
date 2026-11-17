@@ -1,10 +1,15 @@
-import { prepareReceiptImage } from './receipt-image.js';
 import { createReceiptCredentialStore } from './receipt-credential-store.js';
 
 export const receiptApiConfig = Object.freeze({ baseUrl: 'https://ledger.zcorw.xyz', prefix: '/api/v1/receipt-devices' });
 const MAX_RESPONSE_BYTES = 16_384;
 const error = code => new Error(code);
 const check = signal => { if (signal?.aborted) throw error('CANCELLED'); };
+const originalImage = async photo => {
+  if (!(photo?.data instanceof ArrayBuffer) || !photo.data.byteLength) throw error('IMAGE_ENCODING_FAILED');
+  if (photo.data.byteLength > 8 * 1024 * 1024) throw error('IMAGE_TOO_LARGE');
+  if (!['image/png', 'image/jpeg', 'image/webp'].includes(photo.mimeType)) throw error('IMAGE_ENCODING_UNSUPPORTED');
+  return photo;
+};
 
 function wait(ms, signal) {
   return new Promise((resolve, reject) => {
@@ -42,7 +47,7 @@ async function boundedJson(response, signal) {
   } finally { reader.releaseLock?.(); }
 }
 
-export function createReceiptApi({ fetchImpl = (...args) => globalThis.fetch(...args), encodePhoto = prepareReceiptImage, notifyAuthorization = () => {}, now = Date.now, sleep = wait, config = receiptApiConfig, credentialStore = createReceiptCredentialStore() } = {}) {
+export function createReceiptApi({ fetchImpl = (...args) => globalThis.fetch(...args), encodePhoto = originalImage, notifyAuthorization = () => {}, now = Date.now, sleep = wait, config = receiptApiConfig, credentialStore = createReceiptCredentialStore() } = {}) {
   const origin = new URL(config.baseUrl);
   if (origin.protocol !== 'https:' || origin.username || origin.password || origin.search || origin.hash || !['', '/'].includes(origin.pathname)) throw error('BACKEND_CONFIG');
   const base = origin.origin + config.prefix;
@@ -79,7 +84,8 @@ export function createReceiptApi({ fetchImpl = (...args) => globalThis.fetch(...
       if (response.redirected || (response.url && new URL(response.url).href !== base + path)) throw error('BACKEND_REDIRECT');
       const body = await boundedJson(response, controller.signal);
       active(signal);
-      return { status: response.status, body };
+      const receiptId = response.headers?.get?.('X-Receipt-Id');
+      return { status: response.status, body, ...(/^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i.test(receiptId || '') ? { receiptId } : {}) };
     } catch (failure) {
       if (closed || signal?.aborted) throw error('CANCELLED');
       if (timedOut) throw error('TIMEOUT');
@@ -138,6 +144,7 @@ export function createReceiptApi({ fetchImpl = (...args) => globalThis.fetch(...
       const image = await encodePhoto(photo, { signal }); active(signal);
       const response = await request('/receipt-recognition', { method: 'POST', signal, timeout: 55_000, headers: { Authorization: 'Bearer ' + token, 'Content-Type': image.mimeType, 'X-Receipt-Upload': '1' }, body: image.data });
       if (response.status === 401 || response.status === 403) forget();
+      if (response.body?.error?.code === 'RECEIPT_ARCHIVE_FAILED') throw error('RECEIPT_ARCHIVE_FAILED');
       if (response.status === 503 && response.body?.error?.code === 'RECEIPT_NOT_CONFIGURED') throw error('BACKEND_NOT_CONFIGURED');
       if (response.status === 413) throw error('IMAGE_TOO_LARGE');
       if (response.status === 415 || response.body?.error?.code === 'RECEIPT_IMAGE_INVALID') throw error('IMAGE_ENCODING_FAILED');

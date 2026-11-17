@@ -79,6 +79,13 @@ test('a real candidate with only an amount shows no synthetic date, merchant, cu
   for (const field of ['currencySymbol', 'merchant', 'expenseDate', 'category', 'note']) assert.equal(r.p.data.bill[field], '');
 });
 
+test('the recognized bill retains its private archive identifier and clears it when leaving', async t => {
+  const receiptId = 'e4f82d1a-00d4-40d3-a25c-302f55d1f331';
+  const r = page({ recognize: async () => ({ ...result(), receiptId }) }); t.after(() => r.p.onUnload());
+  await r.p.onReady(); assert.equal(await r.p.capture(), true); assert.equal(r.p.data.receiptId, receiptId);
+  assert.equal(r.p.data.bill.merchant, '测试商户'); r.p.onHide(); assert.equal(r.p.data.receiptId, '');
+});
+
 test('the shutter stays inactive while the automatic preview is still acquiring a stream', async t => {
   const acquisition = deferred(); const r = page({ requestStream: () => acquisition.promise }); t.after(() => r.p.onUnload());
   const opening = r.p.onReady(); assert.equal(await r.p.capture(), false); r.p.onKeyUp(key('Enter')); assert.equal(r.counts().shots, 0);

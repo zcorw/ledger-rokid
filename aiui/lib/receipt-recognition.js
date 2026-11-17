@@ -18,12 +18,12 @@ export function createReceiptRecognitionController({ recognize, notify = () => {
         if (closed || current !== generation) return false;
         const candidate = adaptReceiptResponse(response?.status, response?.body);
         if (!candidate.ok) throw new Error(candidate.code);
-        result = candidate; state = 'recognized';
+        result = { ...candidate, ...(/^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i.test(response.receiptId || '') ? { receiptId: response.receiptId } : {}) }; state = 'recognized';
         return true;
       } catch (failure) {
         if (!closed && current === generation) {
           state = 'failed';
-          const codes = ['AUTH_REQUIRED', 'AUTH_STORAGE_UNAVAILABLE', 'AUTH_STORAGE_FAILED', 'RATE_LIMITED', 'TIMEOUT', 'INVALID_RESULT', 'NETWORK_ERROR', 'BACKEND_UNAVAILABLE', 'BACKEND_REDIRECT', 'BACKEND_CONFIG', 'BACKEND_NOT_CONFIGURED', 'RUNTIME_UNSUPPORTED', 'DEVICE_ENDPOINT_UNAVAILABLE', 'DEVICE_ACCESS_DENIED', 'DEVICE_CODE_EXPIRED', 'DEVICE_CODE_USED', 'DEVICE_RATE_LIMIT', 'IMAGE_TOO_LARGE', 'IMAGE_ENCODING_UNSUPPORTED', 'IMAGE_ENCODING_FAILED', 'RECEIPT_NOT_FOUND'];
+          const codes = ['RECEIPT_ARCHIVE_FAILED', 'AUTH_REQUIRED', 'AUTH_STORAGE_UNAVAILABLE', 'AUTH_STORAGE_FAILED', 'RATE_LIMITED', 'TIMEOUT', 'INVALID_RESULT', 'NETWORK_ERROR', 'BACKEND_UNAVAILABLE', 'BACKEND_REDIRECT', 'BACKEND_CONFIG', 'BACKEND_NOT_CONFIGURED', 'RUNTIME_UNSUPPORTED', 'DEVICE_ENDPOINT_UNAVAILABLE', 'DEVICE_ACCESS_DENIED', 'DEVICE_CODE_EXPIRED', 'DEVICE_CODE_USED', 'DEVICE_RATE_LIMIT', 'IMAGE_TOO_LARGE', 'IMAGE_ENCODING_UNSUPPORTED', 'IMAGE_ENCODING_FAILED', 'RECEIPT_NOT_FOUND'];
           error = codes.includes(failure?.message) ? failure.message : 'RECOGNITION_FAILED';
         }
         return false;

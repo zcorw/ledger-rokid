@@ -19,6 +19,8 @@ jobs:
       - run: npm run check
       - run: npm test
       - run: npx playwright install --with-deps chromium
+      - name: Verify registered native review geometry
+        run: node qa/review-layout.mjs
       - name: Verify synthetic review in Chromium
         run: |
           python3 -m http.server 4386 --bind 127.0.0.1 >/tmp/ledger-preview.log 2>&1 &

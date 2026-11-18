@@ -5,7 +5,8 @@
     "pages/capture/index"
   ],
   "permissions": [
-    "CAMERA"
+    "CAMERA",
+    "RECORD_AUDIO"
   ],
   "window": {
     "navigationBarTitleText": "账单拍摄",

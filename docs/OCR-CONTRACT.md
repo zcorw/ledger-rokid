@@ -1,5 +1,7 @@
 # Receipt recognition contract
 
+The recognition response remains the same five-field contract. Review corrections, versioned drafts, opt-in accounting and minimal-journal recovery are separate additions described in [the review workflow](REVIEW-WORKFLOW.md); they do not mount the old isolated authorization experiment.
+
 `aiui/lib/receipt-candidate.js` is a pure adapter used by the native agent's
 real recognition controller and the independent browser chain.
 It accepts an HTTP status and an already decoded **Flow Ledger** candidate body.

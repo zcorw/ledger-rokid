@@ -47,7 +47,7 @@ test('confirmation releases video resources before acquiring the wx camera and c
   const r = rig(); await r.ready();
   assert.deepEqual(await Promise.all([r.c.confirm(), r.c.confirm()]), [true, false]);
   assert.deepEqual(r.events.slice(0, 3), ['stop', 'revoke', 'camera']);
-  assert.deepEqual(r.events.find(value => typeof value === 'object').options, { quality: 'high', mode: 'telephoto', enableSystemPreview: false });
+  assert.deepEqual(r.events.find(value => typeof value === 'object').options, { quality: 'high', mode: 'default', enableSystemPreview: false });
   assert.equal(r.counts().shots, 1); assert.equal(r.c.snapshot().photo.mimeType, 'image/webp');
   assert.deepEqual([...new Uint8Array(r.c.snapshot().photo.data)], [1, 2, 3]);
   assert.equal(r.c.snapshot().preview, null); assert.equal(r.tracks[0].stops, 1); assert.deepEqual(r.revoked, ['blob:preview-1']); r.c.close();

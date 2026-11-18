@@ -26,8 +26,10 @@ export function presentBill(values = {}) {
   const currencySymbol = Object.prototype.hasOwnProperty.call(currencySymbols, code) ? currencySymbols[code] : code;
   const length = amountText.length + currencySymbol.length;
   return {
-    amountText, currencySymbol, amountFontSize: length > 22 ? 18 : length > 17 ? 24 : length > 12 ? 34 : 56,
+    amountText, currencySymbol, currencyCode: code, currencyNotice: code ? '' : '币种待确认',
+    amountFontSize: length > 22 ? 18 : length > 17 ? 24 : length > 12 ? 34 : 42,
     merchant: text('merchant'), expenseDate: text('expenseDate'),
-    category: Object.prototype.hasOwnProperty.call(categoryLabels, category) ? categoryLabels[category] : category, note: text('note'),
+    category: Object.prototype.hasOwnProperty.call(categoryLabels, category) ? categoryLabels[category] : category,
+    account: text('accountName'), note: text('note'),
   };
 }

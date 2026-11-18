@@ -6,6 +6,10 @@ import { createPhotoDisplayController } from '../aiui/lib/photo-display.js';
 import { createReceiptRecognitionController } from '../aiui/lib/receipt-recognition.js';
 import { createReceiptCredentialStore } from '../aiui/lib/receipt-credential-store.js';
 import { presentBill } from '../aiui/lib/bill-presentation.js';
+import { createVoiceReview } from '../aiui/lib/voice-review.js';
+import { createDraftSaver } from '../aiui/lib/receipt-draft.js';
+import { receiptApiConfig } from '../aiui/lib/receipt-api.js';
+import { createNativeConfirmation } from '../aiui/lib/native-confirmation.js';
 const source = await readFile(new URL('../aiui/pages/capture/index.ink', import.meta.url), 'utf8');
 const script = source.match(/<script setup>([\s\S]*?)<\/script>/)[1].replace(/^import .*;$/gm, '').replace('export default', 'return');
 const deferred = () => { let resolve; const promise = new Promise(yes => { resolve = yes; }); return { promise, resolve }; };
@@ -26,11 +30,18 @@ function page(overrides = {}) {
   };
   if (overrides.missingURL) environment.URL = {};
   const wx = {
+    getStorageSync: key => overrides.storage?.get(key) ?? null,
+    setStorageSync: (key, value) => overrides.storage?.set(key, value),
+    removeStorageSync: key => overrides.storage?.delete(key),
     media: { createCameraContext() { events.push('camera'); return { takePhoto: async options => { shots++; events.push({ options }); return overrides.takePhoto ? overrides.takePhoto(options) : { data: new ArrayBuffer(965298), mimeType: 'image/webp' }; } }; } },
     createCanvasContext(id) { assert.equal(id, 'captured-photo'); return { clearRect: (...args) => canvasCalls.push(['clear', ...args]), drawImage: (...args) => canvasCalls.push(['draw', ...args]), flush: () => canvasCalls.push(['flush']) }; },
   };
   const recognize = async (photo, options) => { recognitions++; return overrides.recognize ? overrides.recognize(photo, options) : result(); };
-  const p = new Function('wx', 'createViewfinderController', 'createPhotoDisplayController', 'createReceiptRecognitionController', 'createReceiptApi', 'createReceiptCredentialStore', 'presentBill', 'globalThis', 'Date', 'console', script)(wx, createViewfinderController, createPhotoDisplayController, createReceiptRecognitionController, options => ({ authorize: callOptions => { overrides.authorization?.(options.notifyAuthorization); return overrides.authorize ? overrides.authorize(callOptions) : Promise.resolve(true); }, recognize, close: () => overrides.close?.() }), createReceiptCredentialStore, presentBill, environment, { now: () => time }, overrides.hostConsole || { log() {} });
+  const apiFactory = options => ({
+    authorize: callOptions => { overrides.authorization?.(options.notifyAuthorization); return overrides.authorize ? overrides.authorize(callOptions) : Promise.resolve(true); },
+    recognize, close: () => overrides.close?.(), ...overrides.api,
+  });
+  const p = new Function('wx', 'createViewfinderController', 'createPhotoDisplayController', 'createReceiptRecognitionController', 'createReceiptApi', 'createReceiptCredentialStore', 'presentBill', 'createVoiceReview', 'createDraftSaver', 'createNativeConfirmation', 'receiptApiConfig', 'globalThis', 'Date', 'console', script)(wx, createViewfinderController, createPhotoDisplayController, createReceiptRecognitionController, apiFactory, createReceiptCredentialStore, presentBill, options => createVoiceReview({ ...options, speechFactory: () => { throw new Error('SPEECH_UNSUPPORTED'); } }), createDraftSaver, createNativeConfirmation, receiptApiConfig, environment, { now: () => time }, overrides.hostConsole || { log() {} });
   p.setData = function(value) { updates++; Object.assign(this.data, value); }; p.onLoad();
   return { p, events, revoked, decoded, canvasCalls, stream, advance(ms) { time += ms; }, counts: () => ({ requests, shots, recognitions, stops, updates }) };
 }
@@ -43,9 +54,9 @@ test('opening the agent automatically previews after ready, without exposing a p
   r.p.onReady(); r.p.onShow(); assert.equal(r.counts().requests, 1); assert.equal(r.counts().shots, 0);
 });
 
-test('the agent launches directly into capture and requests no microphone permission', async () => {
+test('the agent launches into capture and declares permission for explicit voice input', async () => {
   const config = JSON.parse(await readFile(new URL('../aiui/app.json', import.meta.url), 'utf8'));
-  assert.deepEqual(config.pages, ['pages/capture/index']); assert.deepEqual(config.permissions, ['CAMERA']);
+  assert.deepEqual(config.pages, ['pages/capture/index']); assert.deepEqual(config.permissions, ['CAMERA', 'RECORD_AUDIO']);
 });
 
 test('one explicit activation captures, recognizes and shows the bill without another button', async t => {
@@ -59,7 +70,35 @@ test('one explicit activation captures, recognizes and shows the bill without an
   assert.equal(r.p.data.bill.merchant, '测试商户'); assert.equal(r.p.data.bill.expenseDate, '2026-11-13'); assert.equal(r.p.data.bill.category, '');
   assert.equal(r.p.controller.snapshot().photo, null); assert.deepEqual(r.p.data.previewItems, []); assert.equal(r.p.data.photoVisible, false);
   assert.equal(await r.p.capture(), false); r.p.onKeyUp(key('Enter')); assert.equal(r.counts().shots, 1);
-  const direction = key('ArrowDown'); r.p.onKeyUp(direction); assert.equal(direction.prevented, false);
+  const direction = key('ArrowDown'); r.p.onKeyUp(direction); assert.equal(direction.prevented, true);
+  assert.equal(r.p.data.selectedAction, 'draft');
+});
+
+test('review keys move across actions without another shutter and duplicate events are ignored', async t => {
+  const r = page(); t.after(() => r.p.onUnload()); await r.p.onReady(); await r.p.capture();
+  assert.equal(r.p.data.selectedAction, 'voice');
+  r.p.onKeyUp(key('ArrowLeft')); assert.equal(r.p.data.selectedAction, 'confirm');
+  r.p.onKeyUp(key('ArrowRight', true)); assert.equal(r.p.data.selectedAction, 'confirm');
+  r.p.onKeyDown(key('Enter')); r.p.submitBill(); r.p.onKeyUp(key('Enter'));
+  assert.equal(r.counts().shots, 1); assert.equal(r.counts().recognitions, 1);
+  assert.equal(r.p.data.bill.amountText, '1,234.25');
+  r.p.onHide(); assert.equal(r.p.activateReview('draft'), false);
+});
+
+test('native confirmation connects the reviewed bill to draft and accounting APIs once', async t => {
+  const id = '11111111-1111-4111-8111-111111111111', account = '22222222-2222-4222-8222-222222222222';
+  let posts = 0; const storage = new Map();
+  const r = page({ storage, recognize: async () => ({ ...result(), receiptId: id }), api: {
+    capabilities: async () => ({ canCreateExpenses: true }),
+    saveDraft: async payload => ({ receiptId: id, revision: 1, values: payload.values, requestKey: payload.requestKey, saved: true }),
+    getConfirmation: async () => ({ status: 'not_found' }),
+    confirmReceipt: async payload => { posts++; return { status: 201, body: { status: 'recorded', receiptId: id, requestKey: payload.requestKey,
+      record: { id: '33333333-3333-4333-8333-333333333333', receipt_id: id, amount: '1234.25', expense_date: '2026-11-13', currency_code: 'JPY', category: 'food', account_id: account, merchant: '测试商户', note: null, source: 'receipt_ocr' } } }; },
+  } }); t.after(() => r.p.onUnload());
+  await r.p.onReady(); await r.p.capture();
+  r.p.reviewValues = { ...r.p.reviewValues, category: 'food', accountId: account, accountName: '测试账户' };
+  assert.equal(await r.p.submitBill(), true); assert.equal(posts, 1); assert.equal(r.p.data.submissionState, 'succeeded');
+  assert.equal(storage.size, 0); assert.equal(r.p.data.bill.account, '测试账户');
 });
 
 test('the native photo stays visible during recognition with its original bytes and MIME', async t => {
@@ -171,6 +210,7 @@ test('unbound entry shows the phone code before camera access and cancels bindin
   let notify, signal, closes = 0; const pending = deferred();
   const r = page({ authorization: callback => { notify = callback; }, authorize: options => { signal = options.signal; return pending.promise; }, close: () => closes++ });
   const run = r.p.onReady();
+  await flush();
   notify({ state: 'pending', userCode: 'ABCD-EFGH', verificationUri: 'https://ledger.zcorw.xyz/receipt-devices' });
   assert.equal(r.p.data.authorizationVisible, true); assert.equal(r.p.data.authorizationCode, 'ABCD-EFGH'); assert.equal(r.p.data.bindingState, 'binding');
   assert.equal(r.counts().requests, 0); assert.equal(await r.p.capture(), false); assert.equal(r.counts().shots, 0); assert.equal(r.counts().recognitions, 0);
@@ -182,7 +222,7 @@ test('unbound entry shows the phone code before camera access and cancels bindin
 test('approval opens preview once and a press begun during binding cannot take a photo', async t => {
   let notify, bindings = 0; const approval = deferred();
   const r = page({ authorization: callback => { notify = callback; }, authorize: () => { bindings++; return approval.promise; } }); t.after(() => r.p.onUnload());
-  r.p.onShow(); const run = r.p.onReady(); r.p.onReady(); r.p.onShow(); assert.equal(bindings, 1);
+  r.p.onShow(); const run = r.p.onReady(); r.p.onReady(); r.p.onShow(); await flush(); assert.equal(bindings, 1);
   notify({ state: 'pending', userCode: 'ABCD-EFGH', verificationUri: 'https://ledger.zcorw.xyz/receipt-devices' }); r.p.onKeyDown(key('Enter'));
   approval.resolve(true); assert.equal(await run, true); assert.equal(r.p.data.bindingState, 'bound'); assert.equal(r.p.data.authorizationVisible, false); assert.equal(r.p.data.authorizationCode, '');
   assert.equal(r.counts().requests, 1); assert.equal(await r.p.onKeyUp(key('Enter')), false); assert.equal(r.counts().shots, 0);
@@ -192,7 +232,7 @@ test('approval opens preview once and a press begun during binding cannot take a
 test('returning during binding ignores old completion and waits for the new approval', async t => {
   const first = deferred(), second = deferred(); const signals = [];
   const r = page({ authorize: options => { signals.push(options.signal); return signals.length === 1 ? first.promise : second.promise; } }); t.after(() => r.p.onUnload());
-  const old = r.p.onReady(); r.p.onHide(); const current = r.p.onShow(); assert.equal(signals[0].aborted, true);
+  const old = r.p.onReady(); await flush(); r.p.onHide(); const current = r.p.onShow(); await flush(); assert.equal(signals[0].aborted, true);
   first.resolve(true); assert.equal(await old, false); assert.equal(r.counts().requests, 0); assert.equal(r.p.data.bindingState, 'checking');
   second.resolve(true); assert.equal(await current, true); assert.equal(r.counts().requests, 1);
 });
@@ -200,7 +240,7 @@ test('returning during binding ignores old completion and waits for the new appr
 test('unloading during binding aborts and ignores a late approval without page updates', async () => {
   const approval = deferred(); let signal;
   const r = page({ authorize: options => { signal = options.signal; return approval.promise; } });
-  const run = r.p.onReady(); r.p.onUnload(); const updates = r.counts().updates; assert.equal(signal.aborted, true);
+  const run = r.p.onReady(); await flush(); r.p.onUnload(); const updates = r.counts().updates; assert.equal(signal.aborted, true);
   approval.resolve(true); assert.equal(await run, false); assert.equal(r.counts().updates, updates); assert.equal(r.counts().requests, 0);
 });
 

@@ -41,7 +41,7 @@ function page(overrides = {}) {
     authorize: callOptions => { overrides.authorization?.(options.notifyAuthorization); return overrides.authorize ? overrides.authorize(callOptions) : Promise.resolve(true); },
     recognize, close: () => overrides.close?.(), ...overrides.api,
   });
-  const p = new Function('wx', 'createViewfinderController', 'createPhotoDisplayController', 'createReceiptRecognitionController', 'createReceiptApi', 'createReceiptCredentialStore', 'presentBill', 'createVoiceReview', 'createDraftSaver', 'createNativeConfirmation', 'receiptApiConfig', 'globalThis', 'Date', 'console', script)(wx, createViewfinderController, createPhotoDisplayController, createReceiptRecognitionController, apiFactory, createReceiptCredentialStore, presentBill, options => createVoiceReview({ ...options, speechFactory: () => { throw new Error('SPEECH_UNSUPPORTED'); } }), createDraftSaver, createNativeConfirmation, receiptApiConfig, environment, { now: () => time }, overrides.hostConsole || { log() {} });
+  const p = new Function('wx', 'createViewfinderController', 'createPhotoDisplayController', 'createReceiptRecognitionController', 'createReceiptApi', 'createReceiptCredentialStore', 'presentBill', 'createVoiceReview', 'createDraftSaver', 'createNativeConfirmation', 'receiptApiConfig', 'globalThis', 'Date', 'console', script)(wx, createViewfinderController, createPhotoDisplayController, createReceiptRecognitionController, apiFactory, createReceiptCredentialStore, presentBill, options => createVoiceReview({ ...options, speechFactory: overrides.speechFactory || (() => { throw new Error('SPEECH_UNSUPPORTED'); }) }), createDraftSaver, createNativeConfirmation, receiptApiConfig, environment, { now: () => time }, overrides.hostConsole || { log() {} });
   p.setData = function(value) { updates++; Object.assign(this.data, value); }; p.onLoad();
   return { p, events, revoked, decoded, canvasCalls, stream, advance(ms) { time += ms; }, counts: () => ({ requests, shots, recognitions, stops, updates }) };
 }
@@ -264,4 +264,73 @@ test('retaking after recognition failure releases the old photo and opens a fres
   const r = page({ recognize: async () => { throw new Error('RECEIPT_NOT_FOUND'); } }); t.after(() => r.p.onUnload());
   await r.p.onReady(); assert.equal(await r.p.capture(), false); assert.match(r.p.data.message, /未识别到账单/);
   assert.equal(await r.p.retake(), true); assert.equal(r.p.controller.snapshot().photo, null); assert.equal(r.p.data.captureState, 'previewing'); assert.equal(r.counts().requests, 2);
+});
+
+const spoken = (...parts) => ({ results: parts.map(([transcript, isFinal = true]) => Object.assign([{ transcript }], { isFinal })) });
+function voicePage(correct) {
+  let corrections = 0, drafts = 0;
+  const speech = { starts: 0, stops: 0, aborts: 0, start() { this.starts++; }, stop() { this.stops++; }, abort() { this.aborts++; } };
+  const storage = new Map();
+  const r = page({ speechFactory: () => speech, storage, api: {
+    correct: (...args) => { corrections++; return correct ? correct(...args) : Promise.resolve({ values: { ...args[0], amount: '700' }, changedFields: ['amount'], warnings: [] }); },
+    saveDraft: async () => { drafts++; throw new Error('unexpected save'); },
+  } });
+  return { ...r, speech, storage, voiceCounts: () => ({ corrections, drafts }) };
+}
+
+test('manual voice input shows all segments and a trailing click cannot stop the new recording', async t => {
+  let sentText; const r = voicePage(async (values, text) => { sentText = text; return { values: { ...values, amount: '700' }, changedFields: ['amount'], warnings: [] }; });
+  t.after(() => r.p.onUnload()); await r.p.onReady(); await r.p.capture(); r.advance(1000);
+  r.p.onKeyDown(key('Enter')); const pending = r.p.onKeyUp(key('Enter'));
+  assert.equal(r.speech.starts, 1); assert.equal(r.p.data.voiceActive, true);
+  assert.equal(r.p.voiceEdit(), false); assert.equal(r.speech.stops, 0);
+  r.speech.onresult(spoken(['我在SEIYU消费了972日元'], ['属于日常', false]));
+  assert.equal(r.p.data.voiceTranscript, '我在SEIYU消费了972日元 属于日常');
+  assert.equal(r.p.data.bill.amountText, '1,234.25'); assert.equal(r.voiceCounts().corrections, 0);
+  assert.equal(r.p.submitBill(), false); assert.equal(r.p.activateReview('draft'), false);
+  r.advance(1000); r.p.onKeyDown(key('Enter')); assert.equal(r.p.onKeyUp(key('Enter')), true);
+  assert.equal(r.speech.stops, 1); assert.equal(r.p.data.voiceState, 'stopping');
+  assert.equal(r.p.voiceEdit(), false);
+  r.speech.onresult(spoken(['我在SEIYU消费了972日元'], ['属于日常分类'], ['支付方式是微信支付']));
+  r.speech.onend(); await pending;
+  assert.equal(sentText, '我在SEIYU消费了972日元 属于日常分类 支付方式是微信支付');
+  assert.equal(r.p.data.voiceActive, false); assert.equal(r.p.data.voiceState, 'corrected');
+  assert.equal(r.p.data.bill.amountText, '700'); assert.equal(r.p.data.voiceTranscript, sentText);
+  assert.deepEqual(r.voiceCounts(), { corrections: 1, drafts: 0 }); assert.equal(r.storage.size, 0);
+});
+
+test('the cancel action uses the draft button without saving, including trailing key/tap events', async t => {
+  const r = voicePage(); t.after(() => r.p.onUnload()); await r.p.onReady(); await r.p.capture(); r.advance(1000);
+  const pending = r.p.voiceEdit();
+  r.speech.onresult(spoken(['不要保存这段话']));
+  r.p.onKeyUp(key('ArrowRight')); assert.equal(r.p.data.selectedAction, 'draft');
+  r.p.onKeyDown(key('Enter')); assert.equal(r.p.onKeyUp(key('Enter')), true);
+  assert.equal(r.p.saveDraft(), false); await pending;
+  assert.equal(r.p.data.voiceActive, false); assert.equal(r.p.data.voiceTranscript, '不要保存这段话');
+  assert.equal(r.p.data.bill.amountText, '1,234.25');
+  assert.deepEqual(r.voiceCounts(), { corrections: 0, drafts: 0 }); assert.equal(r.storage.size, 0);
+});
+
+test('cancel remains reachable while the voice correction request is pending', async t => {
+  const response = deferred(); let signal;
+  const r = voicePage((values, text, options) => { signal = options.signal; return response.promise; });
+  t.after(() => r.p.onUnload()); await r.p.onReady(); await r.p.capture(); r.advance(1000);
+  const pending = r.p.voiceEdit(); r.speech.onresult(spoken(['金额改成700日元']));
+  r.advance(1000); assert.equal(r.p.voiceEdit(), true); r.speech.onend(); await flush();
+  assert.equal(r.p.data.voiceState, 'correcting'); assert.equal(r.p.data.selectedAction, 'draft');
+  r.p.onKeyDown(key('Enter')); r.p.onKeyUp(key('Enter')); assert.equal(signal.aborted, true);
+  response.resolve({ values: { ...r.p.reviewValues, amount: '700' }, changedFields: ['amount'], warnings: [] });
+  await pending; assert.equal(r.p.data.bill.amountText, '1,234.25'); assert.equal(r.voiceCounts().drafts, 0);
+});
+
+test('leaving voice capture clears the local transcript and rejects late updates', async () => {
+  for (const lifecycle of ['onHide', 'onUnload']) {
+    const r = voicePage(); await r.p.onReady(); await r.p.capture(); r.advance(1000);
+    const pending = r.p.voiceEdit(); r.speech.onresult(spoken(['仅保存在当前页面的文字']));
+    const late = r.speech.onresult; r.p[lifecycle](); const updates = r.counts().updates;
+    late(spoken(['迟到文字'])); await pending;
+    assert.equal(r.p.data.voiceTranscript, ''); assert.equal(r.p.data.voiceActive, false);
+    assert.equal(r.counts().updates, updates); assert.equal(r.voiceCounts().corrections, 0);
+    assert.equal(r.storage.size, 0); if (lifecycle === 'onHide') r.p.onUnload();
+  }
 });

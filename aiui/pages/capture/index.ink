@@ -8,7 +8,7 @@ import { createPhotoDisplayController } from '../../lib/photo-display.js';
 import { createReceiptRecognitionController } from '../../lib/receipt-recognition.js';
 import { createReceiptApi, receiptApiConfig } from '../../lib/receipt-api.js';
 import { createReceiptCredentialStore } from '../../lib/receipt-credential-store.js';
-import { presentBill } from '../../lib/bill-presentation.js';
+import { presentBill, presentVoiceFeedback } from '../../lib/bill-presentation.js';
 import { createVoiceReview } from '../../lib/voice-review.js';
 import { createDraftSaver } from '../../lib/receipt-draft.js';
 import { createNativeConfirmation } from '../../lib/native-confirmation.js';
@@ -34,13 +34,11 @@ export default {
       correct: (values, transcript, options) => this.receiptApi.correct(values, transcript, options),
       notify: ({ state, busy, transcript, result, error }) => {
         if (this.pageHidden || this.pageClosed) return;
-        const labels = { amount: '金额', expenseDate: '时间', currencyCode: '币种', merchant: '商户', category: '分类', accountId: '账户', accountName: '账户', note: '备注' };
         const messages = { SPEECH_UNSUPPORTED: '当前眼镜不支持语音输入，请在知产网站继续编辑', SPEECH_PERMISSION: '未获得麦克风权限，账单已保留', SPEECH_EMPTY: '没有听清，请重新收音', SPEECH_TIMEOUT: '等待最终转写超时，文字已保留，尚未修改账单', SPEECH_ENDED: '收音意外结束，文字已保留，尚未提交分析，请重新收音', SPEECH_INCOMPLETE: '未取得完整最终转写，文字已保留，请重新收音', SPEECH_TOO_LONG: '语音文字超过1000字，尚未提交分析，请分次修改', SPEECH_MICROPHONE: '无法打开麦克风，账单已保留', SPEECH_NETWORK: '语音识别网络异常，文字已保留', SPEECH_LANGUAGE: '当前语音服务不支持中文识别', AUTH_REQUIRED: '设备授权已失效，请返回重新绑定' };
         let message = state === 'listening' ? '说完后点击结束收音' : state === 'stopping' ? '正在结束收音并等待最终文字…' : state === 'correcting' ? '正在分析识别文字…' : state === 'cancelled' ? '语音修改已取消，账单未改变' : messages[error] || '修改失败，原账单已保留，请重试';
         if (result) {
           this.reviewValues = { ...result.values };
-          const changes = [...new Set(result.changedFields.map(key => labels[key]))].filter(Boolean);
-          message = [changes.length ? '已修改：' + changes.join('、') : '没有修改字段', ...result.warnings].join('；');
+          message = presentVoiceFeedback(result, transcript);
         }
         this.setData({ reviewBusy: busy, reviewMessage: message, voiceState: state, voiceActive: busy, voiceTranscript: transcript || '', voiceScrollTop: (transcript?.length || 0) * 30, ...(!busy ? { selectedAction: 'voice' } : state === 'stopping' || state === 'correcting' ? { selectedAction: 'draft' } : {}), ...(result ? { bill: presentBill(this.reviewValues) } : {}) });
       },
@@ -354,7 +352,7 @@ export default {
 <page>
 <view class="bill-screen" ink:if="{{billVisible}}">
 <view class="bill-fields" ink:if="{{!voiceActive}}">
-  <view class="bill-row merchant-row"><text class="field-label">商户：</text><scroll-view class="field-value" scroll-x="true"><text class="field-text">{{bill.merchant}}</text></scroll-view></view>
+  <view class="bill-row merchant-row"><text class="field-label">商户：</text><scroll-view class="field-value merchant-value" scroll-y="true"><text class="field-text merchant-text">{{bill.merchant}}</text></scroll-view></view>
   <view class="bill-row amount-row">
     <view class="amount-field"><text class="field-label">金额：</text><scroll-view class="field-value" scroll-x="true"><view class="total"><text class="currency">{{bill.currencySymbol}}</text><text class="amount">{{bill.amountText}}</text><text class="currency-code" ink:if="{{bill.currencyCode}}">({{bill.currencyCode}})</text><text class="currency-notice" ink:if="{{bill.currencyNotice}}">{{bill.currencyNotice}}</text></view></scroll-view></view>
     <view class="category-field"><text class="field-label">分类：</text><scroll-view class="field-value" scroll-x="true"><text class="field-text">{{bill.category}}</text></scroll-view></view>
@@ -393,6 +391,9 @@ export default {
 .field-label { flex-shrink:0; width:54px; font-size:18px; line-height:28px; }
 .field-value { flex:1; min-width:0; height:28px; overflow-x:auto; overflow-y:hidden; }
 .field-text { display:block; font-size:18px; line-height:28px; white-space:nowrap; }
+/* Bound both the viewport and text leaf; do not depend on intrinsic glyph width. */
+.merchant-value { width:0; overflow-x:hidden; overflow-y:auto; }
+.merchant-text { width:100%; box-sizing:border-box; padding-right:8px; white-space:pre-wrap; overflow-wrap:anywhere; word-break:break-all; }
 .amount-field { width:62%; min-width:0; display:flex; flex-direction:row; align-items:center; }
 .category-field { flex:1; min-width:0; margin-left:12px; display:flex; flex-direction:row; align-items:center; }
 .total { display:flex; flex-direction:row; align-items:baseline; height:28px; white-space:nowrap; }
@@ -432,5 +433,8 @@ export default {
   .voice-text { font-size:14px; line-height:20px; }
   .review-actions { padding-top:4px; }
   .review-actions button { height:28px; font-size:14px; padding:2px 0; }
+}
+@media (min-height:160px) and (max-height:200px) {
+  .review-feedback { height:36px; }
 }
 </style>

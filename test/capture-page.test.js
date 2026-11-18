@@ -5,7 +5,7 @@ import { createViewfinderController } from '../aiui/lib/viewfinder.js';
 import { createPhotoDisplayController } from '../aiui/lib/photo-display.js';
 import { createReceiptRecognitionController } from '../aiui/lib/receipt-recognition.js';
 import { createReceiptCredentialStore } from '../aiui/lib/receipt-credential-store.js';
-import { presentBill } from '../aiui/lib/bill-presentation.js';
+import { presentBill, presentVoiceFeedback } from '../aiui/lib/bill-presentation.js';
 import { createVoiceReview } from '../aiui/lib/voice-review.js';
 import { createDraftSaver } from '../aiui/lib/receipt-draft.js';
 import { receiptApiConfig } from '../aiui/lib/receipt-api.js';
@@ -41,7 +41,7 @@ function page(overrides = {}) {
     authorize: callOptions => { overrides.authorization?.(options.notifyAuthorization); return overrides.authorize ? overrides.authorize(callOptions) : Promise.resolve(true); },
     recognize, close: () => overrides.close?.(), ...overrides.api,
   });
-  const p = new Function('wx', 'createViewfinderController', 'createPhotoDisplayController', 'createReceiptRecognitionController', 'createReceiptApi', 'createReceiptCredentialStore', 'presentBill', 'createVoiceReview', 'createDraftSaver', 'createNativeConfirmation', 'receiptApiConfig', 'globalThis', 'Date', 'console', script)(wx, createViewfinderController, createPhotoDisplayController, createReceiptRecognitionController, apiFactory, createReceiptCredentialStore, presentBill, options => createVoiceReview({ ...options, speechFactory: overrides.speechFactory || (() => { throw new Error('SPEECH_UNSUPPORTED'); }) }), createDraftSaver, createNativeConfirmation, receiptApiConfig, environment, { now: () => time }, overrides.hostConsole || { log() {} });
+  const p = new Function('wx', 'createViewfinderController', 'createPhotoDisplayController', 'createReceiptRecognitionController', 'createReceiptApi', 'createReceiptCredentialStore', 'presentBill', 'presentVoiceFeedback', 'createVoiceReview', 'createDraftSaver', 'createNativeConfirmation', 'receiptApiConfig', 'globalThis', 'Date', 'console', script)(wx, createViewfinderController, createPhotoDisplayController, createReceiptRecognitionController, apiFactory, createReceiptCredentialStore, presentBill, presentVoiceFeedback, options => createVoiceReview({ ...options, speechFactory: overrides.speechFactory || (() => { throw new Error('SPEECH_UNSUPPORTED'); }) }), createDraftSaver, createNativeConfirmation, receiptApiConfig, environment, { now: () => time }, overrides.hostConsole || { log() {} });
   p.setData = function(value) { updates++; Object.assign(this.data, value); }; p.onLoad();
   return { p, events, revoked, decoded, canvasCalls, stream, advance(ms) { time += ms; }, counts: () => ({ requests, shots, recognitions, stops, updates }) };
 }
@@ -297,6 +297,27 @@ test('manual voice input shows all segments and a trailing click cannot stop the
   assert.equal(r.p.data.voiceActive, false); assert.equal(r.p.data.voiceState, 'corrected');
   assert.equal(r.p.data.bill.amountText, '700'); assert.equal(r.p.data.voiceTranscript, sentText);
   assert.deepEqual(r.voiceCounts(), { corrections: 1, drafts: 0 }); assert.equal(r.storage.size, 0);
+});
+
+test('the native result distinguishes a matching merchant, an actual correction and unapplied speech', async t => {
+  for (const scenario of [
+    { before: 'SEIYU', target: 'SEIYU', changed: [], message: '商户已是 SEIYU，无需修改' },
+    { before: 'SEIY', target: 'SEIYU', changed: ['merchant'], message: '已修改：商户；当前商户：SEIYU' },
+    { before: 'SEIYU', target: 'SEIYU东京店', changed: [], message: '未应用修改，请核对识别文字或换种说法；当前商户：SEIYU' },
+  ]) {
+    const transcript = '商户名' + scenario.target + '。';
+    const r = voicePage(async (values, text) => {
+      assert.equal(values.merchant, scenario.before); assert.equal(text, transcript);
+      return { values: { ...values, merchant: 'SEIYU' }, changedFields: scenario.changed, warnings: [] };
+    });
+    t.after(() => r.p.onUnload()); await r.p.onReady(); await r.p.capture();
+    r.p.reviewValues.merchant = scenario.before; r.advance(1000);
+    const pending = r.p.voiceEdit(); r.speech.onresult(spoken([transcript]));
+    r.advance(1000); r.p.voiceEdit(); r.speech.onend(); await pending;
+    assert.equal(r.p.data.bill.merchant, 'SEIYU');
+    assert.equal(r.p.data.reviewMessage, scenario.message); assert.equal(r.p.data.voiceTranscript, transcript);
+    assert.deepEqual(r.voiceCounts(), { corrections: 1, drafts: 0 }); assert.equal(r.storage.size, 0);
+  }
 });
 
 test('the cancel action uses the draft button without saving, including trailing key/tap events', async t => {

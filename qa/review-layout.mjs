@@ -14,13 +14,17 @@ const escape = value => String(value ?? '').replace(/[&<>"']/g, c => ({ '&': '&a
 const browser = await chromium.launch({ executablePath: process.env.REVIEW_CHROMIUM_PATH || undefined });
 const page = await browser.newPage();
 const output = process.env.REVIEW_SCREENSHOT_DIR;
-const normal = { amount: '972', currencyCode: 'JPY', merchant: '示例商户', expenseDate: '2026-11-17', accountName: '', category: '' };
+const normal = { amount: '972', currencyCode: 'JPY', merchant: 'SEIYU', expenseDate: '2026-11-17', accountName: '', category: '' };
 const cases = [
   { name: 'normal', values: normal },
   { name: 'empty', values: {} },
   { name: 'amount-only', values: { amount: '972' } },
   { name: 'long', values: { amount: '99999999999999.123456', currencyCode: 'CAD', merchant: '很长的测试商户'.repeat(15), expenseDate: '2026-11-17', accountName: '很长的测试账户'.repeat(15), category: 'food' } },
   { name: 'feedback', values: normal, reviewMessage: '请在手机核对设备并单独允许确认入账。'.repeat(4), writeAuthorizationUrl: 'ledger.zcorw.xyz/receipt-devices?device=11111111-1111-4111-8111-111111111111' },
+  { name: 'merchant-cjk', values: { ...normal, merchant: '西友東京店' } },
+  { name: 'merchant-mixed', values: { ...normal, merchant: 'SEIYU 西友・東京店' } },
+  { name: 'merchant-latin-long', values: { ...normal, merchant: 'W'.repeat(149) + 'U' } },
+  { name: 'merchant-unchanged', values: normal, reviewMessage: '商户已是 SEIYU，无需修改', voiceTranscript: '商户名SEIYU。' },
 ];
 const inside = async locator => {
   const box = await locator.boundingBox(), viewport = page.viewportSize();
@@ -80,8 +84,35 @@ try {
       assert.equal(await page.locator('.currency-notice').count(), bill.currencyCode ? 0 : 1);
       if (bill.currencyCode) assert.equal(await page.locator('.currency-code').innerText(), '(' + bill.currencyCode + ')');
       for (const [selector, value] of [['.merchant-row .field-text', bill.merchant], ['.amount', bill.amountText], ['.date-row .field-text', bill.expenseDate], ['.account-row .field-text', bill.account], ['.category-field .field-text', bill.category]]) assert.equal(await page.locator(selector).textContent(), value);
+      if (bill.merchant) {
+        // Check rendered character bounds, not just textContent: a complete
+        // string can still paint outside its clipped native-style viewport.
+        const geometry = await page.locator('.merchant-text').evaluate(element => {
+          const viewport = element.parentElement, text = element.firstChild;
+          const glyph = index => {
+            const range = document.createRange(); range.setStart(text, index); range.setEnd(text, index + 1);
+            return range.getBoundingClientRect();
+          };
+          const fits = rect => {
+            const box = viewport.getBoundingClientRect();
+            return rect.left >= box.left - 0.5 && rect.right <= box.left + viewport.clientWidth - 7.5
+              && rect.top >= box.top - 0.5 && rect.bottom <= box.top + viewport.clientHeight + 0.5;
+          };
+          const firstVisible = fits(glyph(0));
+          const wraps = viewport.scrollHeight > viewport.clientHeight;
+          if (wraps) viewport.scrollTop = viewport.scrollHeight;
+          const lastVisible = fits(glyph(text.length - 1));
+          return { firstVisible, lastVisible, wraps, horizontalOverflow: viewport.scrollWidth > viewport.clientWidth };
+        });
+        assert.equal(geometry.firstVisible, true, fixture.name + ': first merchant character must be visible');
+        assert.equal(geometry.lastVisible, true, fixture.name + ': final merchant character must fit, including after scrolling');
+        assert.equal(geometry.horizontalOverflow, false, 'merchant wraps inside its definite width with a trailing gutter');
+        if (fixture.name === 'long' || fixture.name === 'merchant-latin-long') assert.equal(geometry.wraps, true);
+        else assert.equal(geometry.wraps, false, 'short merchant names must be visible in full without scrolling');
+        await page.locator('.merchant-value').evaluate(element => { element.scrollTop = 0; });
+      }
       if (fixture.name === 'long') {
-        for (const selector of ['.merchant-row', '.amount-field', '.account-row']) {
+        for (const selector of ['.amount-field', '.account-row']) {
           assert.equal(await page.locator(selector + ' .field-value').evaluate(element => {
             const overflows = element.scrollWidth > element.clientWidth;
             element.scrollLeft = element.scrollWidth;
@@ -92,6 +123,11 @@ try {
       assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth && document.documentElement.scrollHeight <= innerHeight), true);
       if (output && fixture.name === 'normal') {
         const name = 'review-sketch-' + viewport.width + 'x' + viewport.height;
+        await page.screenshot({ path: join(output, name + '.png') });
+        await writeFile(join(output, name + '.html'), await page.content());
+      }
+      if (output && fixture.name === 'merchant-unchanged') {
+        const name = 'merchant-feedback-' + viewport.width + 'x' + viewport.height;
         await page.screenshot({ path: join(output, name + '.png') });
         await writeFile(join(output, name + '.html'), await page.content());
       }
@@ -134,5 +170,5 @@ try {
       }
     }
   }
-  console.log('Native review: 50 geometry cases passed (25 sketch/field cases, 25 manual voice/transcript cases including compact cards).');
+  console.log('Native review: 70 geometry cases passed (45 sketch/merchant/feedback cases, 25 manual voice/transcript cases including compact cards).');
 } finally { await browser.close(); }

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { presentBill } from '../aiui/lib/bill-presentation.js';
+import { presentBill, presentVoiceFeedback } from '../aiui/lib/bill-presentation.js';
 
 test('bill amounts gain grouping without rounding or changing decimal places', () => {
   for (const [amount, expected] of [
@@ -39,4 +39,31 @@ test('review separates currencies sharing a symbol and preserves an unknown acco
   }
   assert.equal(presentBill({ amount: '614' }).currencyNotice, '币种待确认');
   assert.equal(presentBill({ accountName: '现金钱包' }).account, '现金钱包');
+});
+
+test('merchant presentation preserves the final character of Latin, CJK and mixed names', () => {
+  for (const merchant of ['SEIYU', '西友東京店', 'SEIYU 西友・東京店', 'W'.repeat(149) + 'U', '商'.repeat(149) + '店']) {
+    assert.equal(presentBill({ merchant }).merchant, merchant);
+  }
+});
+
+test('unchanged feedback acknowledges only a complete matching merchant instruction', () => {
+  const result = { values: { merchant: 'SEIYU' }, changedFields: [], warnings: [] };
+  for (const text of ['商户名SEIYU。', '商户名称改为 SEIYU', '请把商户改成SEIYU.', '商户：SEIYU']) {
+    assert.equal(presentVoiceFeedback(result, text), '商户已是 SEIYU，无需修改');
+  }
+  for (const text of ['商户名SEIYU东京店。', '商户改成SEIY', '商户不是SEIYU', '商户名SEIYU。金额改成700', '金额改成700', '']) {
+    assert.equal(presentVoiceFeedback(result, text), '未应用修改，请核对识别文字或换种说法；当前商户：SEIYU');
+  }
+  assert.equal(presentVoiceFeedback({ ...result, values: { merchant: '' } }, '商户名SEIYU。'), '未应用修改，请核对识别文字或换种说法；当前商户为空');
+});
+
+test('unapplied feedback retains warnings instead of claiming the request already matches', () => {
+  const result = { values: { merchant: 'SEIYU' }, changedFields: [], warnings: ['账户名称未匹配，请在网站核对'] };
+  assert.equal(presentVoiceFeedback(result, '商户名SEIYU。'), '未应用修改；账户名称未匹配，请在网站核对；当前商户：SEIYU');
+});
+
+test('changed feedback includes the resulting full merchant and deduplicates account labels', () => {
+  const result = { values: { merchant: 'SEIYU 西友・東京店' }, changedFields: ['merchant', 'accountId', 'accountName'], warnings: ['请核对账户'] };
+  assert.equal(presentVoiceFeedback(result, '商户名称改为SEIYU 西友・東京店'), '已修改：商户、账户；当前商户：SEIYU 西友・東京店；请核对账户');
 });

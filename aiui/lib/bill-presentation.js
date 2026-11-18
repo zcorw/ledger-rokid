@@ -11,6 +11,21 @@ const categoryLabels = {
 };
 export const billFieldLabels = { expenseDate: '日期', amount: '金额', currencyCode: '币种', merchant: '商户', category: '类别', note: '备注' };
 
+// Only acknowledge an unchanged merchant when the entire spoken instruction
+// names that exact value. Empty changedFields alone cannot establish why the
+// model left a bill unchanged, especially when it returned a warning.
+export function presentVoiceFeedback(result, transcript = '') {
+  const labels = { amount: '金额', expenseDate: '时间', currencyCode: '币种', merchant: '商户', category: '分类', accountId: '账户', accountName: '账户', note: '备注' };
+  const changes = [...new Set(result.changedFields.map(key => labels[key]))].filter(Boolean);
+  const merchant = result.values.merchant;
+  const currentMerchant = merchant ? '当前商户：' + merchant : '当前商户为空';
+  if (changes.length) return ['已修改：' + changes.join('、'), ...(result.changedFields.includes('merchant') ? [currentMerchant] : []), ...result.warnings].join('；');
+  if (result.warnings.length) return ['未应用修改', ...result.warnings, currentMerchant].join('；');
+  const target = transcript.trim().match(/^(?:请)?(?:把|将)?商户(?:名称|名)?\s*(?:修改为|设置为|改为|改成|设为|是|为|叫|[:：])?\s*(.+?)\s*$/)?.[1];
+  if (merchant && (target === merchant || target === merchant + '。' || target === merchant + '.')) return '商户已是 ' + merchant + '，无需修改';
+  return '未应用修改，请核对识别文字或换种说法；' + currentMerchant;
+}
+
 // Format the decimal string directly so neither precision nor trailing decimals
 // change. Unsupported currency codes stay explicit instead of inventing a symbol.
 export function presentBill(values = {}) {

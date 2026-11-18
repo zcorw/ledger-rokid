@@ -22,7 +22,7 @@ Rokid AIUI 收据拍摄与识别智能体，配合 Flow Ledger 2 使用。
 
 使用 Node.js 22 或更新版本：`npm run check`、`npm test`。通过 `npm ci --ignore-scripts` 安装开发依赖。测试使用合成照片和返回值，不联系生产识别服务；需在支持的原生 AIUI 运行时编译、同步资源包并验收。
 
-运行 `node qa/review-layout.mjs`，检查实际原生模板在 320×240、480×320、640×360 下的布局。`REVIEW_CHROMIUM_PATH` 指定已安装的 Chromium 浏览器，`REVIEW_SCREENSHOT_DIR` 保存合成预览；断言字段位置和底部按钮可见性，覆盖空值、长内容及授权提示。本地 AIX 不会自动更新云端 Agent 或眼镜。需在既有云端 Agent 导入并重新打包，再通过手机更新眼镜资源包，记录实际安装版本后验收。
+运行 `node qa/review-layout.mjs`，检查实际原生模板在 448×150、480×168、320×240、480×320、640×360 下的布局。高度不足 200px 时使用紧凑间距和字号，保留全部字段与按钮；包含发布前实际观察到的 480×168 云端卡片。`REVIEW_CHROMIUM_PATH` 指定已安装的 Chromium 浏览器，`REVIEW_SCREENSHOT_DIR` 保存合成预览；25 组几何检查也在 CI 运行，覆盖空值、长内容及授权提示。本地 AIX 不会自动更新云端 Agent 或眼镜。需在既有云端 Agent 导入并重新打包，再通过手机更新眼镜资源包，记录实际安装版本后验收。
 
 ## 独立浏览器演示
 

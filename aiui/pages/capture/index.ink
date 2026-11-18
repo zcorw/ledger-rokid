@@ -395,4 +395,20 @@ export default {
 .review-actions button { flex:1; min-width:0; height:36px; font-size:16px; padding:4px 0; border:2px solid #155c24; background-color:#000; color:#40ff5e; }
 .review-actions button + button { margin-left:12px; }
 .review-actions .selected { border-color:#40ff5e; }
+@media (max-height:200px) {
+  .bill-screen { padding:4px 12px; }
+  .bill-fields { min-height:80px; }
+  .bill-row { min-height:20px; }
+  .field-label { width:42px; font-size:14px; line-height:20px; }
+  .field-value { height:20px; }
+  .field-text { font-size:14px; line-height:20px; }
+  .total { height:20px; }
+  .currency { font-size:18px; line-height:20px; }
+  .amount { font-size:20px; line-height:20px; }
+  .currency-code, .currency-notice { font-size:12px; line-height:20px; }
+  .review-feedback { height:24px; }
+  .review-message, .bill-screen .authorization-url { font-size:12px; line-height:18px; }
+  .review-actions { padding-top:4px; }
+  .review-actions button { height:28px; font-size:14px; padding:2px 0; }
+}
 </style>

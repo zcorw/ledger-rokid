@@ -44,7 +44,7 @@ async function render({ values, reviewMessage = '', writeAuthorizationUrl = '' }
 }
 try {
   if (output) await mkdir(output, { recursive: true });
-  for (const viewport of [{ width: 320, height: 240 }, { width: 480, height: 320 }, { width: 640, height: 360 }]) {
+  for (const viewport of [{ width: 448, height: 150 }, { width: 480, height: 168 }, { width: 320, height: 240 }, { width: 480, height: 320 }, { width: 640, height: 360 }]) {
     await page.setViewportSize(viewport);
     for (const fixture of cases) {
       const bill = await render(fixture);
@@ -72,7 +72,7 @@ try {
       for (const button of await page.getByRole('button').all()) buttons.push(await inside(button));
       assert.ok(buttons.every(box => Math.abs(box.y - buttons[0].y) < 1 && box.y >= previousBottom));
       assert.ok(buttons[1].x > buttons[0].x + buttons[0].width && buttons[2].x > buttons[1].x + buttons[1].width);
-      assert.ok(Math.abs(buttons[0].y + buttons[0].height - (viewport.height - 12)) < 1, 'actions must stay at the bottom');
+      assert.ok(Math.abs(buttons[0].y + buttons[0].height - (viewport.height - (viewport.height <= 200 ? 4 : 12))) < 1, 'actions must stay at the bottom');
       assert.equal(await page.locator('.selected').innerText(), '语音修改');
       assert.equal(await page.locator('.currency-code').count(), bill.currencyCode ? 1 : 0);
       assert.equal(await page.locator('.currency-notice').count(), bill.currencyCode ? 0 : 1);
@@ -95,5 +95,5 @@ try {
       }
     }
   }
-  console.log('Native review sketch: 15 geometry cases passed (inline fields, category beside amount, fixed bottom actions, empty/long values, feedback).');
+  console.log('Native review sketch: 25 geometry cases passed (compact cards, inline fields, category beside amount, fixed bottom actions, empty/long values, feedback).');
 } finally { await browser.close(); }

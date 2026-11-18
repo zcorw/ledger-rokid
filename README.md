@@ -22,7 +22,7 @@ Deploy both sides together. Flow Ledger 2 must migrate through `0015_device_expe
 
 Use Node.js 22 or newer: `npm run check` and `npm test`. Install development dependencies with `npm ci --ignore-scripts`. Tests use synthetic photos/responses and never contact production recognition. Compile and sync the resource package in a supported native AIUI runtime for device acceptance.
 
-Run `node qa/review-layout.mjs` to check the actual native template at 320×240, 480×320 and 640×360. `REVIEW_CHROMIUM_PATH` selects an installed Chromium browser; `REVIEW_SCREENSHOT_DIR` saves synthetic previews. The checks assert field positions and visible bottom actions, including empty/long values and authorization feedback. A local AIX does not update the cloud Agent or the glasses. Import/rebuild it in the existing cloud Agent, then update the phone/glasses resource package and record the actual installed version before acceptance.
+Run `node qa/review-layout.mjs` to check the actual native template at 448×150, 480×168, 320×240, 480×320 and 640×360. Below 200px tall, compact spacing/fonts keep all fields and actions visible; the 480×168 cloud card observed during release preflight is included. `REVIEW_CHROMIUM_PATH` selects an installed Chromium browser; `REVIEW_SCREENSHOT_DIR` saves synthetic previews. The 25 geometry cases also run in CI and cover empty/long values and authorization feedback. A local AIX does not update the cloud Agent or the glasses. Import/rebuild it in the existing cloud Agent, then update the phone/glasses resource package and record the actual installed version before acceptance.
 
 ## Independent browser demos
 

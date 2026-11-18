@@ -28,9 +28,11 @@ const inside = async locator => {
   assert.ok(box.x >= 0 && box.y >= 0 && box.x + box.width <= viewport.width + 0.5 && box.y + box.height <= viewport.height + 0.5, await locator.getAttribute('class'));
   return box;
 };
-async function render({ values, reviewMessage = '', writeAuthorizationUrl = '' }) {
+async function render({ values, reviewMessage = '', writeAuthorizationUrl = '', voiceState = 'idle', voiceTranscript = '' }) {
   const bill = presentBill(values);
-  const evaluate = expression => new Function('bill', 'billVisible', 'selectedAction', 'reviewBusy', 'submissionPending', 'submissionState', 'reviewMessage', 'writeAuthorizationUrl', 'return (' + expression + ');')(bill, true, 'voice', false, false, 'idle', reviewMessage, writeAuthorizationUrl);
+  const voiceActive = ['listening', 'stopping', 'correcting'].includes(voiceState);
+  const context = { bill, billVisible: true, selectedAction: voiceActive && voiceState !== 'listening' ? 'draft' : 'voice', reviewBusy: voiceActive, submissionPending: false, submissionState: 'idle', reviewMessage, writeAuthorizationUrl, voiceState, voiceActive, voiceTranscript, voiceScrollTop: voiceTranscript.length * 30 };
+  const evaluate = expression => new Function(...Object.keys(context), 'return (' + expression + ');')(...Object.values(context));
   const html = template.replace(/{{([^}]+)}}/g, (_, expression) => escape(evaluate(expression)))
     .replace(/<(\/?)(?:view|scroll-view)\b/g, '<$1div').replace(/<(\/?)(?:text)\b/g, '<$1span');
   await page.setContent('<html lang="zh-CN"><meta charset="utf-8"><style>html,body{margin:0;width:100%;height:100%;font-family:sans-serif}*{box-sizing:border-box}button{font-family:inherit}div[scroll-x]{scrollbar-width:none}' + styles + '</style>' + html + '</html>');
@@ -94,6 +96,43 @@ try {
         await writeFile(join(output, name + '.html'), await page.content());
       }
     }
+    const spoken = '我在示例商户消费了700日元，属于日用食品分类，支付账户是合成现金。';
+    for (const fixture of [
+      { name: 'listening-empty', state: 'listening', text: '' },
+      { name: 'listening', state: 'listening', text: spoken },
+      { name: 'stopping', state: 'stopping', text: spoken.repeat(10) },
+      { name: 'correcting', state: 'correcting', text: spoken },
+      { name: 'corrected', state: 'corrected', text: spoken },
+    ]) {
+      const active = fixture.state !== 'corrected';
+      await render({ values: normal, voiceState: fixture.state, voiceTranscript: fixture.text, reviewMessage: active ? '' : '已修改：分类、账户' });
+      const buttons = await page.getByRole('button').all();
+      assert.equal(buttons.length, 3);
+      for (const button of buttons) await inside(button);
+      assert.ok(Math.abs((await buttons[0].boundingBox()).y + (await buttons[0].boundingBox()).height - (viewport.height - (viewport.height <= 200 ? 4 : 12))) < 1);
+      if (active) {
+        await inside(page.locator('.voice-panel')); await inside(page.locator('.voice-transcript'));
+        assert.equal(await page.locator('.voice-text').textContent(), fixture.text || '等待说话…');
+        assert.equal(await page.locator('.bill-fields').count(), 0);
+        assert.deepEqual(await page.getByRole('button').allTextContents(), [fixture.state === 'listening' ? '结束收音' : fixture.state === 'stopping' ? '结束中…' : '正在分析', '取消', '确认']);
+        assert.equal(await buttons[0].isEnabled(), fixture.state === 'listening');
+        assert.equal(await buttons[1].isEnabled(), true); assert.equal(await buttons[2].isEnabled(), false);
+        if (fixture.state === 'stopping') assert.equal(await page.locator('.voice-transcript').evaluate(element => {
+          element.scrollTop = element.scrollHeight; return element.scrollHeight > element.clientHeight && element.scrollTop > 0;
+        }), true);
+      } else {
+        assert.equal(await page.locator('.voice-panel').count(), 0);
+        assert.equal(await page.locator('.field-label').count(), 5);
+        assert.equal(await page.locator('.review-transcript').textContent(), '识别：' + spoken);
+        assert.deepEqual(await page.getByRole('button').allTextContents(), ['语音修改', '草稿', '确认']);
+      }
+      assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth && document.documentElement.scrollHeight <= innerHeight), true);
+      if (output && fixture.name === 'listening') {
+        const name = 'voice-listening-' + viewport.width + 'x' + viewport.height;
+        await page.screenshot({ path: join(output, name + '.png') });
+        await writeFile(join(output, name + '.html'), await page.content());
+      }
+    }
   }
-  console.log('Native review sketch: 25 geometry cases passed (compact cards, inline fields, category beside amount, fixed bottom actions, empty/long values, feedback).');
+  console.log('Native review: 50 geometry cases passed (25 sketch/field cases, 25 manual voice/transcript cases including compact cards).');
 } finally { await browser.close(); }

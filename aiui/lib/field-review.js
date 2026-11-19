@@ -1,6 +1,15 @@
 import { presentBill } from './bill-presentation.js';
 
 export const reviewFields = ['merchant', 'amount', 'category', 'expenseDate', 'currencyCode', 'account', 'note'];
+const fieldRows = [['merchant'], ['amount', 'category'], ['expenseDate', 'currencyCode'], ['account', 'note']];
+export function moveFieldFocus(field, direction, preferredColumn = 0) {
+  const row = Math.max(0, fieldRows.findIndex(fields => fields.includes(field)));
+  let column = fieldRows[row].length === 1 ? preferredColumn : fieldRows[row].indexOf(field);
+  if (direction === 'left') column = 0;
+  if (direction === 'right' && fieldRows[row].length > 1) column = 1;
+  const nextRow = direction === 'up' ? Math.max(0, row - 1) : direction === 'down' ? Math.min(fieldRows.length - 1, row + 1) : row;
+  return { field: fieldRows[nextRow][Math.min(column, fieldRows[nextRow].length - 1)], column };
+}
 export const fieldLabels = { merchant: '商户', amount: '金额', category: '分类', expenseDate: '时间', currencyCode: '币种', account: '账户', note: '备注' };
 const groups = { category: 'categories', currencyCode: 'currencies', account: 'accounts' };
 export const needsChoices = field => Object.prototype.hasOwnProperty.call(groups, field);

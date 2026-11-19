@@ -14,6 +14,7 @@ const escape = value => String(value ?? '').replace(/[&<>"']/g, c => ({ '&': '&a
 const browser = await chromium.launch({ executablePath: process.env.REVIEW_CHROMIUM_PATH || undefined });
 const page = await browser.newPage();
 const output = process.env.REVIEW_SCREENSHOT_DIR;
+let renderedCases = 0;
 const normal = { amount: '972', currencyCode: 'JPY', merchant: 'SEIYU', expenseDate: '2026-11-17', accountName: '', category: '' };
 const cases = [
   { name: 'normal', values: normal },
@@ -25,6 +26,7 @@ const cases = [
   { name: 'merchant-mixed', values: { ...normal, merchant: 'SEIYU 西友・東京店' } },
   { name: 'merchant-latin-long', values: { ...normal, merchant: 'W'.repeat(149) + 'U' } },
   { name: 'merchant-unchanged', values: normal, reviewMessage: '商户已是 SEIYU，无需修改', voiceTranscript: '商户名SEIYU。' },
+  { name: 'head-unavailable', values: normal, headNavigationMessage: '当前眼镜无法启用头部选择，可在知产网站编辑字段' },
 ];
 const inside = async locator => {
   const box = await locator.boundingBox(), viewport = page.viewportSize();
@@ -32,10 +34,11 @@ const inside = async locator => {
   assert.ok(box.x >= 0 && box.y >= 0 && box.x + box.width <= viewport.width + 0.5 && box.y + box.height <= viewport.height + 0.5, await locator.getAttribute('class'));
   return box;
 };
-async function render({ values, reviewMessage = '', writeAuthorizationUrl = '', voiceState = 'idle', voiceTranscript = '', focusedField = 'merchant', fieldEditorVisible = false, fieldOptions = [], fieldTitle = '分类', fieldCurrent = '' }) {
+async function render({ values, reviewMessage = '', headNavigationMessage = '', writeAuthorizationUrl = '', voiceState = 'idle', voiceTranscript = '', focusedField = 'merchant', fieldEditorVisible = false, fieldOptions = [], fieldTitle = '分类', fieldCurrent = '' }) {
+  renderedCases++;
   const bill = presentBill(values);
   const voiceActive = ['listening', 'stopping', 'correcting'].includes(voiceState);
-  const context = { bill, billVisible: true, selectedAction: voiceActive && voiceState !== 'listening' ? 'draft' : 'voice', reviewBusy: voiceActive, submissionPending: false, submissionState: 'idle', reviewMessage, writeAuthorizationUrl, voiceState, voiceActive, voiceTranscript, voiceScrollTop: voiceTranscript.length * 30, focusedField, fieldEditorVisible, fieldOptions, fieldTitle, fieldCurrent, fieldOptionsMessage: '', fieldOptionsScrollTop: 0 };
+  const context = { bill, billVisible: true, selectedAction: voiceActive && voiceState !== 'listening' ? 'draft' : 'voice', reviewBusy: voiceActive, submissionPending: false, submissionState: 'idle', reviewMessage, headNavigationMessage, writeAuthorizationUrl, voiceState, voiceActive, voiceTranscript, voiceScrollTop: voiceTranscript.length * 30, focusedField, fieldEditorVisible, fieldOptions, fieldTitle, fieldCurrent, fieldOptionsMessage: '', fieldOptionsScrollTop: 0 };
   const evaluate = expression => new Function(...Object.keys(context), 'return (' + expression + ');')(...Object.values(context));
   const html = template.replace(/<text class="voice-option" ink:for="{{fieldOptions}}" ink:key="value">{{item.label}}<\/text>/, '__FIELD_OPTIONS__')
     .replace(/{{([^}]+)}}/g, (_, expression) => escape(evaluate(expression)))
@@ -214,5 +217,5 @@ try {
       }
     }
   }
-  console.log('Native review: 125 geometry cases passed (70 review/manual voice, 35 field focus and 20 scoped voice/choice cases including compact cards).');
+  console.log(`Native review: ${renderedCases} geometry cases passed, including field focus, scoped choices, sensor feedback and manual voice on compact cards.`);
 } finally { await browser.close(); }

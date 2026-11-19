@@ -32,13 +32,15 @@ const inside = async locator => {
   assert.ok(box.x >= 0 && box.y >= 0 && box.x + box.width <= viewport.width + 0.5 && box.y + box.height <= viewport.height + 0.5, await locator.getAttribute('class'));
   return box;
 };
-async function render({ values, reviewMessage = '', writeAuthorizationUrl = '', voiceState = 'idle', voiceTranscript = '' }) {
+async function render({ values, reviewMessage = '', writeAuthorizationUrl = '', voiceState = 'idle', voiceTranscript = '', focusedField = 'merchant', fieldEditorVisible = false, fieldOptions = [], fieldTitle = '分类', fieldCurrent = '' }) {
   const bill = presentBill(values);
   const voiceActive = ['listening', 'stopping', 'correcting'].includes(voiceState);
-  const context = { bill, billVisible: true, selectedAction: voiceActive && voiceState !== 'listening' ? 'draft' : 'voice', reviewBusy: voiceActive, submissionPending: false, submissionState: 'idle', reviewMessage, writeAuthorizationUrl, voiceState, voiceActive, voiceTranscript, voiceScrollTop: voiceTranscript.length * 30 };
+  const context = { bill, billVisible: true, selectedAction: voiceActive && voiceState !== 'listening' ? 'draft' : 'voice', reviewBusy: voiceActive, submissionPending: false, submissionState: 'idle', reviewMessage, writeAuthorizationUrl, voiceState, voiceActive, voiceTranscript, voiceScrollTop: voiceTranscript.length * 30, focusedField, fieldEditorVisible, fieldOptions, fieldTitle, fieldCurrent, fieldOptionsMessage: '', fieldOptionsScrollTop: 0 };
   const evaluate = expression => new Function(...Object.keys(context), 'return (' + expression + ');')(...Object.values(context));
-  const html = template.replace(/{{([^}]+)}}/g, (_, expression) => escape(evaluate(expression)))
-    .replace(/<(\/?)(?:view|scroll-view)\b/g, '<$1div').replace(/<(\/?)(?:text)\b/g, '<$1span');
+  const html = template.replace(/<text class="voice-option" ink:for="{{fieldOptions}}" ink:key="value">{{item.label}}<\/text>/, '__FIELD_OPTIONS__')
+    .replace(/{{([^}]+)}}/g, (_, expression) => escape(evaluate(expression)))
+    .replace(/<(\/?)(?:view|scroll-view)\b/g, '<$1div').replace(/<(\/?)(?:text)\b/g, '<$1span')
+    .replace('__FIELD_OPTIONS__', () => fieldOptions.map(item => '<span class="voice-option">' + escape(item.label) + '</span>').join(''));
   await page.setContent('<html lang="zh-CN"><meta charset="utf-8"><style>html,body{margin:0;width:100%;height:100%;font-family:sans-serif}*{box-sizing:border-box}button{font-family:inherit}div[scroll-x]{scrollbar-width:none}' + styles + '</style>' + html + '</html>');
   await page.evaluate(() => {
     for (const element of document.querySelectorAll('*')) {
@@ -54,7 +56,7 @@ try {
     await page.setViewportSize(viewport);
     for (const fixture of cases) {
       const bill = await render(fixture);
-      assert.deepEqual(await page.locator('.field-label').allTextContents(), ['商户：', '金额：', '分类：', '时间：', '账户：']);
+      assert.deepEqual(await page.locator('.field-label').allTextContents(), ['商户：', '金额：', '分类：', '时间：', '币种：', '账户：', '备注：']);
       for (const label of await page.locator('.field-label').all()) await inside(label);
       const rows = ['.merchant-row', '.amount-row', '.date-row', '.account-row'];
       let previousBottom = 0;
@@ -65,7 +67,7 @@ try {
       }
       // Category belongs beside amount, not beside merchant. Values share the
       // label's line instead of making another row for every value.
-      for (const field of ['.merchant-row', '.amount-field', '.category-field', '.date-row', '.account-row']) {
+      for (const field of ['.merchant-row', '.amount-field', '.category-field', '.date-field', '.code-field', '.account-field', '.note-field']) {
         const label = await inside(page.locator(field + ' > .field-label'));
         const value = await inside(page.locator(field + ' > .field-value'));
         assert.ok(Math.abs(label.y - value.y) < 1, 'labels and values must be inline');
@@ -79,11 +81,12 @@ try {
       assert.ok(buttons.every(box => Math.abs(box.y - buttons[0].y) < 1 && box.y >= previousBottom));
       assert.ok(buttons[1].x > buttons[0].x + buttons[0].width && buttons[2].x > buttons[1].x + buttons[1].width);
       assert.ok(Math.abs(buttons[0].y + buttons[0].height - (viewport.height - (viewport.height <= 200 ? 4 : 12))) < 1, 'actions must stay at the bottom');
-      assert.equal(await page.locator('.selected').innerText(), '语音修改');
+      assert.equal(await page.locator('.selected').count(), 0);
+      assert.equal(await page.locator('.field-selected').getAttribute('data-field'), 'merchant');
       assert.equal(await page.locator('.currency-code').count(), bill.currencyCode ? 1 : 0);
       assert.equal(await page.locator('.currency-notice').count(), bill.currencyCode ? 0 : 1);
       if (bill.currencyCode) assert.equal(await page.locator('.currency-code').innerText(), '(' + bill.currencyCode + ')');
-      for (const [selector, value] of [['.merchant-row .field-text', bill.merchant], ['.amount', bill.amountText], ['.date-row .field-text', bill.expenseDate], ['.account-row .field-text', bill.account], ['.category-field .field-text', bill.category]]) assert.equal(await page.locator(selector).textContent(), value);
+      for (const [selector, value] of [['.merchant-row .field-text', bill.merchant], ['.amount', bill.amountText], ['.date-field .field-text', bill.expenseDate], ['.account-field .field-text', bill.account], ['.category-field .field-text', bill.category], ['.code-field .field-text', bill.currencyCode], ['.note-field .field-text', bill.note]]) assert.equal(await page.locator(selector).textContent(), value);
       if (bill.merchant) {
         // Check rendered character bounds, not just textContent: a complete
         // string can still paint outside its clipped native-style viewport.
@@ -112,7 +115,7 @@ try {
         await page.locator('.merchant-value').evaluate(element => { element.scrollTop = 0; });
       }
       if (fixture.name === 'long') {
-        for (const selector of ['.amount-field', '.account-row']) {
+        for (const selector of ['.amount-field', '.account-field']) {
           assert.equal(await page.locator(selector + ' .field-value').evaluate(element => {
             const overflows = element.scrollWidth > element.clientWidth;
             element.scrollLeft = element.scrollWidth;
@@ -131,6 +134,47 @@ try {
         await page.screenshot({ path: join(output, name + '.png') });
         await writeFile(join(output, name + '.html'), await page.content());
       }
+    }
+    for (const focusedField of ['merchant', 'amount', 'category', 'expenseDate', 'currencyCode', 'account', 'note']) {
+      await render({ values: normal, focusedField });
+      const selected = page.locator('.field-selected'); await inside(selected);
+      assert.equal(await selected.getAttribute('data-field'), focusedField);
+      assert.equal(await page.locator('.field-selected').count(), 1);
+      assert.equal(await page.locator('[bindtap="fieldTap"]').count(), 7);
+      for (const button of await page.getByRole('button').all()) await inside(button);
+    }
+    const categories = ['未分类', '餐饮', '日用', '交通', '住房', '水电', '购物', '医疗', '娱乐', '教育', '旅行', '其他'].map((label, index) => ({ value: String(index), label }));
+    const longAccounts = Array.from({ length: 125 }, (_, i) => ({ value: String(i), label: '完整账户名'.repeat(8) + i }));
+    for (const fixture of [
+      { name: 'categories', title: '分类', choices: categories, state: 'listening' },
+      { name: 'accounts', title: '账户', choices: longAccounts, state: 'listening' },
+      { name: 'ambiguous', title: '分类', choices: categories, state: 'corrected' },
+      { name: 'free-text', title: '商户', choices: [], state: 'listening' },
+    ]) {
+      await render({ values: normal, fieldEditorVisible: true, fieldTitle: fixture.title, fieldCurrent: fixture.title === '商户' ? 'SEIYU' : '', fieldOptions: fixture.choices, voiceState: fixture.state, voiceTranscript: '识别出的字段新内容', reviewMessage: fixture.state === 'corrected' ? '匹配到多个接近选项，请说出完整名称' : '' });
+      assert.equal(await page.locator('.bill-fields').count(), 0);
+      await inside(page.locator('.voice-panel')); await inside(page.locator('.voice-transcript'));
+      assert.equal(await page.locator('.voice-title').textContent(), '修改' + fixture.title);
+      assert.deepEqual(await page.locator('.voice-option').allTextContents(), fixture.choices.map(x => x.label));
+      const buttons = await page.getByRole('button').all();
+      assert.deepEqual(await page.getByRole('button').allTextContents(), [fixture.state === 'corrected' ? '重新收音' : '结束收音', '取消', '确认']);
+      assert.equal(await buttons[0].isEnabled(), true); assert.equal(await buttons[1].isEnabled(), true); assert.equal(await buttons[2].isEnabled(), false);
+      for (const button of buttons) await inside(button);
+      if (fixture.choices.length) {
+        await inside(page.locator('.voice-options'));
+        const layout = await page.locator('.voice-options').evaluate(element => {
+          const overflows = element.scrollHeight > element.clientHeight;
+          element.scrollTop = element.scrollHeight;
+          const last = element.querySelector('.voice-option:last-child').getBoundingClientRect(), box = element.getBoundingClientRect();
+          return { overflows, lastVisible: last.bottom <= box.bottom + 1 && last.bottom > box.top, horizontalOverflow: element.scrollWidth > element.clientWidth };
+        });
+        assert.equal(layout.lastVisible, true); assert.equal(layout.horizontalOverflow, false);
+        if (fixture.name === 'categories' || fixture.name === 'ambiguous') assert.equal(layout.overflows, false, 'all 12 categories should fit on one page');
+        if (fixture.name === 'accounts') assert.equal(layout.overflows, true, 'all long account names must be reachable in the same scroll area');
+        await page.locator('.voice-options').evaluate(element => { element.scrollTop = 0; });
+      }
+      assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth && document.documentElement.scrollHeight <= innerHeight), true);
+      if (output && fixture.name === 'categories') await page.screenshot({ path: join(output, 'field-options-' + viewport.width + 'x' + viewport.height + '.png') });
     }
     const spoken = '我在示例商户消费了700日元，属于日用食品分类，支付账户是合成现金。';
     for (const fixture of [
@@ -158,7 +202,7 @@ try {
         }), true);
       } else {
         assert.equal(await page.locator('.voice-panel').count(), 0);
-        assert.equal(await page.locator('.field-label').count(), 5);
+        assert.equal(await page.locator('.field-label').count(), 7);
         assert.equal(await page.locator('.review-transcript').textContent(), '识别：' + spoken);
         assert.deepEqual(await page.getByRole('button').allTextContents(), ['语音修改', '草稿', '确认']);
       }
@@ -170,5 +214,5 @@ try {
       }
     }
   }
-  console.log('Native review: 70 geometry cases passed (45 sketch/merchant/feedback cases, 25 manual voice/transcript cases including compact cards).');
+  console.log('Native review: 125 geometry cases passed (70 review/manual voice, 35 field focus and 20 scoped voice/choice cases including compact cards).');
 } finally { await browser.close(); }

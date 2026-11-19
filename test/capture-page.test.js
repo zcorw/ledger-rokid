@@ -7,6 +7,7 @@ import { createReceiptRecognitionController } from '../aiui/lib/receipt-recognit
 import { createReceiptCredentialStore } from '../aiui/lib/receipt-credential-store.js';
 import { presentBill, presentVoiceFeedback } from '../aiui/lib/bill-presentation.js';
 import { createVoiceReview } from '../aiui/lib/voice-review.js';
+import * as fieldReview from '../aiui/lib/field-review.js';
 import { createDraftSaver } from '../aiui/lib/receipt-draft.js';
 import { receiptApiConfig } from '../aiui/lib/receipt-api.js';
 import { createNativeConfirmation } from '../aiui/lib/native-confirmation.js';
@@ -39,9 +40,10 @@ function page(overrides = {}) {
   const recognize = async (photo, options) => { recognitions++; return overrides.recognize ? overrides.recognize(photo, options) : result(); };
   const apiFactory = options => ({
     authorize: callOptions => { overrides.authorization?.(options.notifyAuthorization); return overrides.authorize ? overrides.authorize(callOptions) : Promise.resolve(true); },
+    reviewOptions: async () => ({ version: 1, categories: [{ value: 'food', label: '餐饮' }, { value: 'groceries', label: '日用' }], currencies: [{ value: 'JPY', label: 'JPY 日元' }], accounts: [{ value: '11111111-1111-4111-8111-111111111111', label: '合成微信支付' }] }),
     recognize, close: () => overrides.close?.(), ...overrides.api,
   });
-  const p = new Function('wx', 'createViewfinderController', 'createPhotoDisplayController', 'createReceiptRecognitionController', 'createReceiptApi', 'createReceiptCredentialStore', 'presentBill', 'presentVoiceFeedback', 'createVoiceReview', 'createDraftSaver', 'createNativeConfirmation', 'receiptApiConfig', 'globalThis', 'Date', 'console', script)(wx, createViewfinderController, createPhotoDisplayController, createReceiptRecognitionController, apiFactory, createReceiptCredentialStore, presentBill, presentVoiceFeedback, options => createVoiceReview({ ...options, speechFactory: overrides.speechFactory || (() => { throw new Error('SPEECH_UNSUPPORTED'); }) }), createDraftSaver, createNativeConfirmation, receiptApiConfig, environment, { now: () => time }, overrides.hostConsole || { log() {} });
+  const p = new Function(...Object.keys(fieldReview), 'wx', 'createViewfinderController', 'createPhotoDisplayController', 'createReceiptRecognitionController', 'createReceiptApi', 'createReceiptCredentialStore', 'presentBill', 'presentVoiceFeedback', 'createVoiceReview', 'createDraftSaver', 'createNativeConfirmation', 'receiptApiConfig', 'globalThis', 'Date', 'console', script)(...Object.values(fieldReview), wx, createViewfinderController, createPhotoDisplayController, createReceiptRecognitionController, apiFactory, createReceiptCredentialStore, presentBill, presentVoiceFeedback, options => createVoiceReview({ ...options, speechFactory: overrides.speechFactory || (() => { throw new Error('SPEECH_UNSUPPORTED'); }) }), createDraftSaver, createNativeConfirmation, receiptApiConfig, environment, { now: () => time }, overrides.hostConsole || { log() {} });
   p.setData = function(value) { updates++; Object.assign(this.data, value); }; p.onLoad();
   return { p, events, revoked, decoded, canvasCalls, stream, advance(ms) { time += ms; }, counts: () => ({ requests, shots, recognitions, stops, updates }) };
 }
@@ -71,7 +73,7 @@ test('one explicit activation captures, recognizes and shows the bill without an
   assert.equal(r.p.controller.snapshot().photo, null); assert.deepEqual(r.p.data.previewItems, []); assert.equal(r.p.data.photoVisible, false);
   assert.equal(await r.p.capture(), false); r.p.onKeyUp(key('Enter')); assert.equal(r.counts().shots, 1);
   const direction = key('ArrowDown'); r.p.onKeyUp(direction); assert.equal(direction.prevented, true);
-  assert.equal(r.p.data.selectedAction, 'draft');
+  assert.equal(r.p.data.focusedField, 'amount');
 });
 
 test('review keys move across actions without another shutter and duplicate events are ignored', async t => {
@@ -281,6 +283,7 @@ function voicePage(correct) {
 test('manual voice input shows all segments and a trailing click cannot stop the new recording', async t => {
   let sentText; const r = voicePage(async (values, text) => { sentText = text; return { values: { ...values, amount: '700' }, changedFields: ['amount'], warnings: [] }; });
   t.after(() => r.p.onUnload()); await r.p.onReady(); await r.p.capture(); r.advance(1000);
+  for (let i = 0; i < 3; i++) r.p.onKeyUp(key('ArrowUp'));
   r.p.onKeyDown(key('Enter')); const pending = r.p.onKeyUp(key('Enter'));
   assert.equal(r.speech.starts, 1); assert.equal(r.p.data.voiceActive, true);
   assert.equal(r.p.voiceEdit(), false); assert.equal(r.speech.stops, 0);
@@ -318,6 +321,52 @@ test('the native result distinguishes a matching merchant, an actual correction 
     assert.equal(r.p.data.reviewMessage, scenario.message); assert.equal(r.p.data.voiceTranscript, transcript);
     assert.deepEqual(r.voiceCounts(), { corrections: 1, drafts: 0 }); assert.equal(r.storage.size, 0);
   }
+});
+
+test('all seven fields precede the three actions on the swipe path', async t => {
+  const r = page(); t.after(() => r.p.onUnload()); await r.p.onReady(); await r.p.capture();
+  assert.equal(r.p.data.focusedField, 'merchant');
+  for (const field of ['amount', 'category', 'expenseDate', 'currencyCode', 'account', 'note']) { r.p.onKeyUp(key('ArrowDown')); assert.equal(r.p.data.focusedField, field); }
+  for (const action of ['voice', 'draft', 'confirm']) { r.p.onKeyUp(key('ArrowDown')); assert.equal(r.p.data.focusedField, ''); assert.equal(r.p.data.selectedAction, action); }
+  r.p.onKeyUp(key('ArrowDown')); assert.equal(r.p.data.focusedField, 'merchant'); r.p.onKeyUp(key('ArrowUp')); assert.equal(r.p.data.selectedAction, 'confirm');
+});
+test('the selected field isolates changes and a trailing tap cannot stop its recording', async t => {
+  const r = voicePage(async (values, transcript, options) => {
+    assert.equal(options.targetField, 'amount'); assert.equal(transcript, '七百日元');
+    return { values: { ...values, amount: '700', merchant: 'wrong', currencyCode: 'USD' }, changedFields: ['amount', 'merchant', 'currencyCode'], warnings: [], fieldOutcome: 'matched' };
+  });
+  t.after(() => r.p.onUnload()); await r.p.onReady(); await r.p.capture(); r.advance(1000);
+  r.p.onKeyUp(key('ArrowDown')); r.p.onKeyDown(key('Enter')); const pending = r.p.onKeyUp(key('Enter'));
+  assert.equal(r.p.data.fieldEditorVisible, true); assert.equal(r.p.data.fieldTitle, '金额'); assert.equal(r.p.voiceEdit(), false); assert.equal(r.speech.stops, 0);
+  r.speech.onresult(spoken(['七百日元'])); r.advance(1000); r.p.voiceEdit(); r.speech.onend(); await pending;
+  assert.equal(r.p.reviewValues.amount, '700'); assert.equal(r.p.reviewValues.merchant, '测试商户'); assert.equal(r.p.reviewValues.currencyCode, 'JPY');
+  assert.equal(r.p.data.fieldEditorVisible, false); assert.equal(r.p.data.focusedField, 'amount'); assert.equal(r.p.data.reviewMessage, '已修改金额：700'); assert.equal(r.voiceCounts().drafts, 0);
+});
+test('ambiguous speech retains every option and Back returns without changing the bill', async t => {
+  const r = voicePage(async values => ({ values: { ...values, category: 'food' }, changedFields: [], warnings: ['匹配到多个接近选项，请重说'], fieldOutcome: 'ambiguous' }));
+  t.after(() => r.p.onUnload()); await r.p.onReady(); await r.p.capture(); await flush(); r.advance(1000);
+  const pending = r.p.fieldTap({ currentTarget: { dataset: { field: 'category' } } });
+  assert.equal(r.p.data.fieldOptions.length, 2); assert.equal(r.p.submitBill(), false);
+  r.speech.onresult(spoken(['餐饮或日用'])); r.advance(1000); r.p.voiceEdit(); r.speech.onend(); await pending;
+  assert.equal(r.p.data.fieldEditorVisible, true); assert.equal(r.p.reviewValues.category, ''); assert.equal(r.p.data.voiceTranscript, '餐饮或日用'); assert.match(r.p.data.reviewMessage, /多个/); assert.equal(r.p.data.fieldOptions.length, 2);
+  r.p.onKeyUp(key('Backspace')); assert.equal(r.p.data.fieldEditorVisible, false); assert.equal(r.p.data.billVisible, true); assert.equal(r.p.data.focusedField, 'category'); assert.equal(r.voiceCounts().drafts, 0);
+});
+test('leaving a field aborts loading and ignores late option results', async () => {
+  const delayed = deferred(); let optionSignal; const speech = { start() {}, stop() {}, abort() {} };
+  const r = page({ speechFactory: () => speech, api: { reviewOptions: options => { optionSignal = options.signal; return delayed.promise; } } });
+  await r.p.onReady(); await r.p.capture(); r.advance(1000); const pending = r.p.editField('account'); assert.equal(r.p.data.fieldEditorVisible, true);
+  r.p.onHide(); assert.equal(optionSignal.aborted, true); delayed.resolve({ version: 1, categories: [], currencies: [], accounts: [] }); await pending; await flush();
+  assert.equal(r.p.reviewOptions, null); assert.deepEqual(r.p.data.fieldOptions, []); assert.equal(r.p.data.fieldEditorVisible, false); assert.equal(r.p.data.voiceTranscript, ''); r.p.onUnload();
+});
+test('temple directions scroll choices in the same page and keep Stop reachable', async t => {
+  const r = voicePage(); t.after(() => r.p.onUnload()); await r.p.onReady(); await r.p.capture(); await flush(); r.advance(1000);
+  const pending = r.p.editField('account');
+  r.p.onKeyUp(key('ArrowDown')); assert.equal(r.p.data.fieldOptionsScrollTop, 36); assert.equal(r.p.data.selectedAction, 'voice');
+  r.p.optionsScrolled({ detail: { scrollTop: 90, scrollHeight: 150, clientHeight: 60 } });
+  r.p.onKeyUp(key('ArrowDown')); assert.equal(r.p.data.fieldOptionsScrollTop, 90);
+  r.p.onKeyUp(key('ArrowUp')); assert.equal(r.p.data.fieldOptionsScrollTop, 54);
+  assert.equal(r.p.data.fieldOptions.length, 1); r.p.onKeyUp(key('Backspace')); await pending;
+  assert.equal(r.p.data.billVisible, true); assert.equal(r.voiceCounts().drafts, 0);
 });
 
 test('the cancel action uses the draft button without saving, including trailing key/tap events', async t => {

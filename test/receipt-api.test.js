@@ -56,6 +56,19 @@ test('voice correction sends only the transcript and candidate through the authe
   assert.equal(call.credentials, 'omit'); assert.equal(f.encoded.length, 0);
 });
 
+test('scoped requests preserve the target and all choices use the same receipt grant', async () => {
+  const accounts = Array.from({ length: 180 }, (_, i) => ({ value: '11111111-1111-4111-8111-' + i.toString().padStart(12, '0'), label: '完整合成账户名称'.repeat(10) + i }));
+  const options = { version: 1, categories: [], currencies: [], accounts };
+  const f = fixture({ store: memoryStore(saved()), fetch: async url => url.endsWith('/review-options') ? json(options) : url.endsWith('/review-correction') ? json({ values: {}, changedFields: [], warnings: [] }) : null });
+  assert.deepEqual(await f.api.reviewOptions(), options); assert.equal(f.calls.at(-1).headers.Authorization, 'Bearer ' + 's'.repeat(43)); assert.equal(f.calls.at(-1).maxResponseBytes, undefined); assert.equal(f.starts(), 0);
+  await f.api.correct({ amount: '972' }, '七百', { targetField: 'amount' });
+  assert.deepEqual(JSON.parse(f.calls.at(-1).body), { values: { amount: '972' }, transcript: '七百', targetField: 'amount' });
+});
+test('a missing options endpoint fails explicitly without clearing valid authorization', async () => {
+  const store = memoryStore(saved()), f = fixture({ store, fetch: () => json({ error: { code: 'NOT_FOUND' } }, 404) });
+  await assert.rejects(f.api.reviewOptions(), /REVIEW_OPTIONS_UNAVAILABLE/); assert.ok(store.read());
+});
+
 test('confirmation uses the existing grant, checks capabilities and queries an operation by key', async () => {
   const id = '11111111-1111-4111-8111-111111111111';
   const f = fixture({ fetch: async url => {

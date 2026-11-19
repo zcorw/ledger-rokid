@@ -20,11 +20,11 @@ function wait(ms, signal) {
   });
 }
 
-async function boundedJson(response, signal) {
+async function boundedJson(response, signal, maxBytes = MAX_RESPONSE_BYTES) {
   const declared = Number(response.headers?.get?.('content-length'));
-  if (declared > MAX_RESPONSE_BYTES || !String(response.headers?.get?.('content-type') || '').toLowerCase().includes('application/json')) {
+  if (declared > maxBytes || !String(response.headers?.get?.('content-type') || '').toLowerCase().includes('application/json')) {
     try { await response.body?.cancel?.(); } catch {}
-    throw error(declared > MAX_RESPONSE_BYTES || response.status < 400 ? 'INVALID_RESULT' : 'BACKEND_UNAVAILABLE');
+    throw error(declared > maxBytes || response.status < 400 ? 'INVALID_RESULT' : 'BACKEND_UNAVAILABLE');
   }
   if (typeof response.body?.getReader !== 'function' || typeof TextDecoder !== 'function') throw error('RUNTIME_UNSUPPORTED');
   const reader = response.body.getReader(), decoder = new TextDecoder('utf-8', { fatal: true });
@@ -33,7 +33,7 @@ async function boundedJson(response, signal) {
     while (true) {
       check(signal); const { done, value } = await reader.read(); check(signal);
       if (done) break;
-      if (!(value instanceof Uint8Array) || (length += value.byteLength) > MAX_RESPONSE_BYTES) throw error('INVALID_RESULT');
+      if (!(value instanceof Uint8Array) || (length += value.byteLength) > maxBytes) throw error('INVALID_RESULT');
       text += decoder.decode(value, { stream: true });
     }
     text += decoder.decode();
@@ -72,7 +72,7 @@ export function createReceiptApi({ fetchImpl = (...args) => globalThis.fetch(...
     else forget();
   }
 
-  async function request(path, { signal, timeout = 15_000, ...options } = {}) {
+  async function request(path, { signal, timeout = 15_000, maxResponseBytes = MAX_RESPONSE_BYTES, ...options } = {}) {
     active(signal);
     if (typeof globalThis.AbortController !== 'function') throw error('RUNTIME_UNSUPPORTED');
     const controller = new AbortController(); let timedOut = false;
@@ -82,7 +82,7 @@ export function createReceiptApi({ fetchImpl = (...args) => globalThis.fetch(...
       const response = await fetchImpl(base + path, { ...options, credentials: 'omit', redirect: 'error', cache: 'no-store', timeout, signal: controller.signal });
       active(signal);
       if (response.redirected || (response.url && new URL(response.url).href !== base + path)) throw error('BACKEND_REDIRECT');
-      const body = await boundedJson(response, controller.signal);
+      const body = await boundedJson(response, controller.signal, maxResponseBytes);
       active(signal);
       const receiptId = response.headers?.get?.('X-Receipt-Id');
       return { status: response.status, body, ...(/^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i.test(receiptId || '') ? { receiptId } : {}) };
@@ -171,9 +171,17 @@ export function createReceiptApi({ fetchImpl = (...args) => globalThis.fetch(...
       if (response.status !== 200) throw error(response.body?.error?.code || 'DRAFT_FAILED');
       return response.body;
     },
-    async correct(values, transcript, { signal } = {}) {
+    async reviewOptions({ signal } = {}) {
       const token = await authorized(signal); active(signal);
-      const response = await request('/review-correction', { ...json({ values, transcript }, signal), timeout: 55_000, headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token } });
+      const response = await request('/review-options', { signal, maxResponseBytes: 1_048_576, headers: { Authorization: 'Bearer ' + token } });
+      if (response.status === 401) { forget(); throw error('AUTH_REQUIRED'); }
+      if (response.status === 404) throw error('REVIEW_OPTIONS_UNAVAILABLE');
+      if (response.status !== 200) throw error(response.body?.error?.code || 'REVIEW_OPTIONS_UNAVAILABLE');
+      return response.body;
+    },
+    async correct(values, transcript, { signal, targetField } = {}) {
+      const token = await authorized(signal); active(signal);
+      const response = await request('/review-correction', { ...json({ values, transcript, ...(targetField ? { targetField } : {}) }, signal), timeout: 55_000, headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token } });
       if (response.status === 401) { forget(); throw error('AUTH_REQUIRED'); }
       if (response.status !== 200) throw error(response.body?.error?.code || 'CORRECTION_FAILED');
       return response.body;

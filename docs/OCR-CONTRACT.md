@@ -1,5 +1,7 @@
 # Receipt recognition contract
 
+The paired backend adds `GET /review-options` (version 1; complete categories, enabled currencies and active owned accounts) and optional `targetField` on `POST /review-correction`. Scoped replies add `fieldOutcome`: `matched`, `unchanged`, `ambiguous` or `unmatched`. Client/server both enforce the field boundary. Enumerated fields use exact normalized labels/aliases, unique contained names, then conservative text similarity (at least 0.72 with a 0.15 lead); close competitors/negations require clarification. This is not general phonetic/semantic matching. Free fields use the existing model with an explicit target; other returned fields are discarded. There are no financial writes. Choices stay in memory and clear on hide/exit. Deploy this backend increment before installing the native package; unavailable/invalid choices fail explicitly. Existing requests without a target retain their earlier behavior.
+
 The recognition response remains the same five-field contract. Review corrections, versioned drafts, opt-in accounting and minimal-journal recovery are separate additions described in [the review workflow](REVIEW-WORKFLOW.md); they do not mount the old isolated authorization experiment.
 
 `aiui/lib/receipt-candidate.js` is a pure adapter used by the native agent's

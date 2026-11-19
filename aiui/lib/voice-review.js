@@ -13,7 +13,7 @@ export function createVoiceReview({ speechFactory = () => {
   }
   return {
     stop() { return requestStop?.() ?? false; },
-    async run(values) {
+    async run(values, context = {}) {
       if (closed || busy) return false;
       busy = true; lastTranscript = '';
       const current = ++generation, controller = new AbortController();
@@ -80,7 +80,7 @@ export function createVoiceReview({ speechFactory = () => {
         if (!active()) return false;
         requestStop = null; pending = () => controller.abort();
         notify({ state: 'correcting', busy: true, transcript });
-        const result = await correct({ ...values }, transcript, { signal: controller.signal });
+        const result = await correct({ ...values }, transcript, { ...context, signal: controller.signal });
         if (!active()) return false;
         if (!result || typeof result.values !== 'object' || !Array.isArray(result.changedFields) || !Array.isArray(result.warnings)) throw new Error('INVALID_RESULT');
         const keys = ['amount', 'expenseDate', 'currencyCode', 'merchant', 'category', 'accountId', 'accountName', 'note'];

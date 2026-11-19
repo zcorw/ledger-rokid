@@ -27,6 +27,11 @@ const cases = [
   { name: 'merchant-latin-long', values: { ...normal, merchant: 'W'.repeat(149) + 'U' } },
   { name: 'merchant-unchanged', values: normal, reviewMessage: '商户已是 SEIYU，无需修改', voiceTranscript: '商户名SEIYU。' },
   { name: 'head-unavailable', values: normal, headNavigationMessage: '当前眼镜无法启用头部选择，可在知产网站编辑字段' },
+  { name: 'head-waiting', values: normal, headNavigationMessage: '头控：等待姿态数据…' },
+  { name: 'head-calibrating', values: normal, headNavigationMessage: '头控：已收到姿态，请保持平视片刻' },
+  { name: 'head-ready', values: normal, headNavigationMessage: '头控就绪：上下-12° 左右18°' },
+  { name: 'head-neutral', values: normal, headNavigationMessage: '头控：请回正（-12° / 18°）' },
+  { name: 'head-no-data', values: normal, headNavigationMessage: '头控：未收到姿态数据，请重新打开智能体' },
 ];
 const inside = async locator => {
   const box = await locator.boundingBox(), viewport = page.viewportSize();
@@ -34,11 +39,11 @@ const inside = async locator => {
   assert.ok(box.x >= 0 && box.y >= 0 && box.x + box.width <= viewport.width + 0.5 && box.y + box.height <= viewport.height + 0.5, await locator.getAttribute('class'));
   return box;
 };
-async function render({ values, reviewMessage = '', headNavigationMessage = '', writeAuthorizationUrl = '', voiceState = 'idle', voiceTranscript = '', focusedField = 'merchant', fieldEditorVisible = false, fieldOptions = [], fieldTitle = '分类', fieldCurrent = '' }) {
+async function render({ values, reviewMessage = '', headNavigationMessage = '头控就绪：上下0° 左右0°', headNavigationProblem = false, writeAuthorizationUrl = '', voiceState = 'idle', voiceTranscript = '', focusedField = 'merchant', fieldEditorVisible = false, fieldOptions = [], fieldTitle = '分类', fieldCurrent = '' }) {
   renderedCases++;
   const bill = presentBill(values);
   const voiceActive = ['listening', 'stopping', 'correcting'].includes(voiceState);
-  const context = { bill, billVisible: true, selectedAction: voiceActive && voiceState !== 'listening' ? 'draft' : 'voice', reviewBusy: voiceActive, submissionPending: false, submissionState: 'idle', reviewMessage, headNavigationMessage, writeAuthorizationUrl, voiceState, voiceActive, voiceTranscript, voiceScrollTop: voiceTranscript.length * 30, focusedField, fieldEditorVisible, fieldOptions, fieldTitle, fieldCurrent, fieldOptionsMessage: '', fieldOptionsScrollTop: 0 };
+  const context = { bill, billVisible: true, selectedAction: voiceActive && voiceState !== 'listening' ? 'draft' : 'voice', reviewBusy: voiceActive, submissionPending: false, submissionState: 'idle', reviewMessage, headNavigationMessage, headNavigationProblem, writeAuthorizationUrl, voiceState, voiceActive, voiceTranscript, voiceScrollTop: voiceTranscript.length * 30, focusedField, fieldEditorVisible, fieldOptions, fieldTitle, fieldCurrent, fieldOptionsMessage: '', fieldOptionsScrollTop: 0 };
   const evaluate = expression => new Function(...Object.keys(context), 'return (' + expression + ');')(...Object.values(context));
   const html = template.replace(/<text class="voice-option" ink:for="{{fieldOptions}}" ink:key="value">{{item.label}}<\/text>/, '__FIELD_OPTIONS__')
     .replace(/{{([^}]+)}}/g, (_, expression) => escape(evaluate(expression)))
@@ -153,8 +158,9 @@ try {
       { name: 'accounts', title: '账户', choices: longAccounts, state: 'listening' },
       { name: 'ambiguous', title: '分类', choices: categories, state: 'corrected' },
       { name: 'free-text', title: '商户', choices: [], state: 'listening' },
+      { name: 'head-no-data', title: '分类', choices: categories, state: 'listening', headNavigationMessage: '头控：未收到姿态数据，请重新打开智能体', headNavigationProblem: true },
     ]) {
-      await render({ values: normal, fieldEditorVisible: true, fieldTitle: fixture.title, fieldCurrent: fixture.title === '商户' ? 'SEIYU' : '', fieldOptions: fixture.choices, voiceState: fixture.state, voiceTranscript: '识别出的字段新内容', reviewMessage: fixture.state === 'corrected' ? '匹配到多个接近选项，请说出完整名称' : '' });
+      await render({ values: normal, fieldEditorVisible: true, fieldTitle: fixture.title, fieldCurrent: fixture.title === '商户' ? 'SEIYU' : '', fieldOptions: fixture.choices, voiceState: fixture.state, voiceTranscript: '识别出的字段新内容', reviewMessage: fixture.state === 'corrected' ? '匹配到多个接近选项，请说出完整名称' : '', headNavigationMessage: fixture.headNavigationMessage, headNavigationProblem: fixture.headNavigationProblem });
       assert.equal(await page.locator('.bill-fields').count(), 0);
       await inside(page.locator('.voice-panel')); await inside(page.locator('.voice-transcript'));
       assert.equal(await page.locator('.voice-title').textContent(), '修改' + fixture.title);
@@ -172,7 +178,7 @@ try {
           return { overflows, lastVisible: last.bottom <= box.bottom + 1 && last.bottom > box.top, horizontalOverflow: element.scrollWidth > element.clientWidth };
         });
         assert.equal(layout.lastVisible, true); assert.equal(layout.horizontalOverflow, false);
-        if (fixture.name === 'categories' || fixture.name === 'ambiguous') assert.equal(layout.overflows, false, 'all 12 categories should fit on one page');
+        if (['categories', 'ambiguous', 'head-no-data'].includes(fixture.name)) assert.equal(layout.overflows, false, 'all 12 categories should fit on one page');
         if (fixture.name === 'accounts') assert.equal(layout.overflows, true, 'all long account names must be reachable in the same scroll area');
         await page.locator('.voice-options').evaluate(element => { element.scrollTop = 0; });
       }

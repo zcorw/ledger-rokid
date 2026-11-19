@@ -11,17 +11,18 @@ import { createReceiptCredentialStore } from '../../lib/receipt-credential-store
 import { presentBill, presentVoiceFeedback } from '../../lib/bill-presentation.js';
 import { createVoiceReview } from '../../lib/voice-review.js';
 import { reviewFields, moveFieldFocus, fieldLabels, fieldValue, needsChoices, parseReviewOptions, choicesFor, scopeFieldResult, fieldFeedback } from '../../lib/field-review.js';
-import { createHeadNavigation } from '../../lib/head-navigation.js';
+import { createHeadNavigation, createPageOrientationSensor } from '../../lib/head-navigation.js';
 import { createDraftSaver } from '../../lib/receipt-draft.js';
 import { createNativeConfirmation } from '../../lib/native-confirmation.js';
 export default {
   data: { busy: false, bindingState: 'checking', captureState: 'idle', recognitionState: 'idle', previewItems: [], photoVisible: false, photoMessage: '', billVisible: false, bill: {}, receiptId: '', selectedAction: 'voice', reviewBusy: false, reviewMessage: '', voiceState: 'idle', voiceActive: false, voiceTranscript: '', voiceScrollTop: 0, authorizationVisible: false, authorizationCode: '', authorizationUrl: '', message: '正在检查绑定…', canRetry: false, entryHint: '单击拍照，自动识别账单', focusedField: '', fieldEditorVisible: false, fieldTitle: '', fieldCurrent: '', fieldOptions: [], fieldOptionsMessage: '', fieldOptionsScrollTop: 0 },
   onLoad() {
-    this.setData({ submissionState: 'idle', submissionPending: false, writeAuthorizationUrl: '', headNavigationMessage: '' });
+    this.setData({ submissionState: 'idle', submissionPending: false, writeAuthorizationUrl: '', headNavigationMessage: '', headNavigationProblem: false });
     this.lastReviewAction = 'voice'; this.lastFocusedField = 'merchant'; this.fieldColumn = 0; this.lastReviewSwipe = null;
     this.headNavigation = createHeadNavigation({
+      sensorFactory: () => createPageOrientationSensor(this),
       onDirection: direction => this.headDirection(direction),
-      onUnavailable: () => { if (this.allowCameraAction() && this.data.billVisible) this.setData({ headNavigationMessage: '当前眼镜无法启用头部选择，可在知产网站编辑字段' }); },
+      onStatus: status => this.headStatus(status),
     });
     this.recoveryChecked = false; this.recoveryPending = false;
     this.pageHidden = false; this.pageClosed = false; this.pageReady = false;
@@ -94,8 +95,7 @@ export default {
           this.loadReviewOptions();
         }
         const messages = { AUTH_STORAGE_UNAVAILABLE: '当前运行时不支持保存设备授权，请升级运行时', AUTH_STORAGE_FAILED: '设备授权存储失败，请重试', RECEIPT_ARCHIVE_FAILED: '原图保存失败，请重试', AUTH_REQUIRED: '设备授权已失效，请重试并在手机授权', DEVICE_ACCESS_DENIED: '已拒绝授权，可重试重新申请', DEVICE_CODE_EXPIRED: '授权码已过期，请重试', DEVICE_CODE_USED: '授权码已使用，请重试', DEVICE_RATE_LIMIT: '授权请求过于频繁，请稍后重试', DEVICE_ENDPOINT_UNAVAILABLE: '后端尚未部署设备授权接口', RATE_LIMITED: '识别请求过于频繁，请稍后重试', TIMEOUT: '识别超时，请重试', INVALID_RESULT: '识别结果无效，请重试', NETWORK_ERROR: '连接失败，请检查网络后重试', BACKEND_UNAVAILABLE: '识别服务暂不可用，请稍后重试', BACKEND_NOT_CONFIGURED: '后端尚未配置识别服务', BACKEND_REDIRECT: '后端地址发生跳转，请检查 HTTPS 配置', BACKEND_CONFIG: '后端 HTTPS 地址配置无效', RUNTIME_UNSUPPORTED: '当前运行时不支持识别网络接口', IMAGE_TOO_LARGE: '照片过大，请重新拍摄', IMAGE_ENCODING_UNSUPPORTED: '当前运行时不支持照片格式转换', IMAGE_ENCODING_FAILED: '照片转换失败，请重新拍摄', RECEIPT_NOT_FOUND: '未识别到账单，请重新拍摄', RECOGNITION_FAILED: '识别失败，请重试' };
-        this.setData({ recognitionState: state, ...(!busy ? { authorizationVisible: false, authorizationCode: '', authorizationUrl: '' } : {}), billVisible: state === 'recognized', receiptId: result?.receiptId || '', bill: result ? presentBill(result.values) : {}, busy: busy || !!this.controller?.snapshot().busy || this.captureActionBusy, canRetry: state === 'failed', ...(state === 'recognizing' ? { message: '正在识别账单…' } : state === 'failed' ? { message: messages[error] || messages.RECOGNITION_FAILED } : state === 'recognized' ? { message: '' } : {}) });
-        this.syncHeadNavigation();
+        this.setData({ recognitionState: state, ...(!busy ? { authorizationVisible: false, authorizationCode: '', authorizationUrl: '' } : {}), billVisible: state === 'recognized', receiptId: result?.receiptId || '', bill: result ? presentBill(result.values) : {}, busy: busy || !!this.controller?.snapshot().busy || this.captureActionBusy, canRetry: state === 'failed', ...(state === 'recognizing' ? { message: '正在识别账单…' } : state === 'failed' ? { message: messages[error] || messages.RECOGNITION_FAILED } : state === 'recognized' ? { message: '' } : {}) }, () => this.syncHeadNavigation());
       },
     });
     this.controller = createViewfinderController({
@@ -258,10 +258,14 @@ export default {
     return this.allowCameraAction() && this.data.billVisible && !this.data.submissionPending && !this.submission?.isBusy() && !this.submission?.hasPending() && !['succeeded', 'conflict'].includes(this.data.submissionState) && (!this.data.reviewBusy || this.data.fieldEditorVisible) && (!this.data.voiceActive || this.data.fieldEditorVisible);
   },
   syncHeadNavigation() {
-    if (this.canUseHeadNavigation()) {
-      if (this.headNavigation?.start() && this.data.headNavigationMessage) this.setData({ headNavigationMessage: '' });
-    }
+    if (this.canUseHeadNavigation()) this.headNavigation?.start();
     else this.headNavigation?.stop();
+  },
+  headStatus({ state, pitch = 0, yaw = 0, reason }) {
+    if (!this.allowCameraAction() || (!this.data.billVisible && state !== 'idle')) return;
+    const errors = { no_data: '头控：未收到姿态数据，请重新打开智能体', invalid: '头控：姿态数据无效，请重新打开智能体', stalled: '头控：姿态数据已中断，请重新打开智能体' };
+    const messages = { idle: '', waiting: '头控：等待姿态数据…', calibrating: '头控：已收到姿态，请保持平视片刻', ready: '头控就绪：上下' + pitch + '° 左右' + yaw + '°', neutral: '头控：请回正（' + pitch + '° / ' + yaw + '°）', unavailable: errors[reason] || '头控：无法启用头部选择，可在知产网站编辑' };
+    if (Object.prototype.hasOwnProperty.call(messages, state)) this.setData({ headNavigationMessage: messages[state], headNavigationProblem: !['idle', 'ready', 'neutral'].includes(state) });
   },
   headDirection(direction) {
     if (!['up', 'down', 'left', 'right'].includes(direction) || !this.canUseHeadNavigation()) return false;
@@ -487,7 +491,7 @@ export default {
   <view class="bill-row date-row"><view class="date-field {{focusedField === 'expenseDate' ? 'field-selected' : ''}}" data-field="expenseDate" bindtap="fieldTap"><text class="field-label">时间：</text><scroll-view class="field-value" scroll-x="true"><text class="field-text">{{bill.expenseDate}}</text></scroll-view></view><view class="code-field {{focusedField === 'currencyCode' ? 'field-selected' : ''}}" data-field="currencyCode" bindtap="fieldTap"><text class="field-label">币种：</text><scroll-view class="field-value" scroll-x="true"><text class="field-text">{{bill.currencyCode}}</text></scroll-view></view></view>
   <view class="bill-row account-row"><view class="account-field {{focusedField === 'account' ? 'field-selected' : ''}}" data-field="account" bindtap="fieldTap"><text class="field-label">账户：</text><scroll-view class="field-value" scroll-x="true"><text class="field-text">{{bill.account}}</text></scroll-view></view><view class="note-field {{focusedField === 'note' ? 'field-selected' : ''}}" data-field="note" bindtap="fieldTap"><text class="field-label">备注：</text><scroll-view class="field-value" scroll-x="true"><text class="field-text">{{bill.note}}</text></scroll-view></view></view>
 </view>
-<view class="voice-panel" ink:if="{{voiceActive || fieldEditorVisible}}"><view class="voice-heading"><text class="voice-title">{{fieldEditorVisible ? '修改' + fieldTitle : voiceState === 'listening' ? '正在收音' : voiceState === 'stopping' ? '正在结束收音' : '正在分析语音'}}</text><text class="voice-current" ink:if="{{fieldEditorVisible}}">{{fieldCurrent || '当前为空'}}</text></view><text class="voice-hint">{{voiceState === 'listening' ? fieldEditorVisible && fieldOptions.length ? '抬头低头看选项；滑动选按钮；单击结束' : '说完后单击「结束收音」' : voiceActive ? '已停止收音，正在处理完整文字' : reviewMessage}}</text><text class="voice-options-message" ink:if="{{headNavigationMessage}}">{{headNavigationMessage}}</text><text class="voice-options-message" ink:if="{{fieldEditorVisible && fieldOptionsMessage}}">{{fieldOptionsMessage}}</text><scroll-view class="voice-options" scroll-y="true" scroll-top="{{fieldOptionsScrollTop}}" bindscroll="optionsScrolled" ink:if="{{fieldEditorVisible && fieldOptions.length}}"><view class="option-grid"><text class="voice-option" ink:for="{{fieldOptions}}" ink:key="value">{{item.label}}</text></view></scroll-view><scroll-view class="voice-transcript" scroll-y="true" scroll-top="{{voiceScrollTop}}"><text class="voice-text">{{voiceTranscript || '等待说话…'}}</text></scroll-view></view>
+<view class="voice-panel" ink:if="{{voiceActive || fieldEditorVisible}}"><view class="voice-heading"><text class="voice-title">{{fieldEditorVisible ? '修改' + fieldTitle : voiceState === 'listening' ? '正在收音' : voiceState === 'stopping' ? '正在结束收音' : '正在分析语音'}}</text><text class="voice-current" ink:if="{{fieldEditorVisible}}">{{fieldCurrent || '当前为空'}}</text></view><text class="voice-hint">{{headNavigationProblem ? headNavigationMessage : voiceState === 'listening' ? fieldEditorVisible && fieldOptions.length ? '抬头低头看选项；滑动选按钮；单击结束' : '说完后单击「结束收音」' : voiceActive ? '已停止收音，正在处理完整文字' : reviewMessage}}</text><text class="voice-options-message" ink:if="{{fieldEditorVisible && fieldOptionsMessage}}">{{fieldOptionsMessage}}</text><scroll-view class="voice-options" scroll-y="true" scroll-top="{{fieldOptionsScrollTop}}" bindscroll="optionsScrolled" ink:if="{{fieldEditorVisible && fieldOptions.length}}"><view class="option-grid"><text class="voice-option" ink:for="{{fieldOptions}}" ink:key="value">{{item.label}}</text></view></scroll-view><scroll-view class="voice-transcript" scroll-y="true" scroll-top="{{voiceScrollTop}}"><text class="voice-text">{{voiceTranscript || '等待说话…'}}</text></scroll-view></view>
 <scroll-view class="review-feedback" scroll-y="true" ink:if="{{!voiceActive && !fieldEditorVisible && (reviewMessage || headNavigationMessage || writeAuthorizationUrl || voiceTranscript)}}"><text class="review-message">{{reviewMessage}}</text><text class="review-message" ink:if="{{headNavigationMessage}}">{{headNavigationMessage}}</text><text class="review-transcript" ink:if="{{voiceTranscript}}">识别：{{voiceTranscript}}</text><text class="authorization-url" ink:if="{{writeAuthorizationUrl}}">{{writeAuthorizationUrl}}</text></scroll-view>
 <view class="review-actions"><button class="{{(!focusedField || voiceActive || fieldEditorVisible) && selectedAction === 'voice' ? 'selected' : ''}}" bindtap="voiceEdit" disabled="{{(reviewBusy && voiceState !== 'listening') || submissionPending || submissionState === 'succeeded'}}">{{voiceState === 'listening' ? '结束收音' : voiceState === 'stopping' ? '结束中…' : voiceState === 'correcting' ? '正在分析' : fieldEditorVisible ? '重新收音' : '语音修改'}}</button><button class="{{(!focusedField || voiceActive || fieldEditorVisible) && selectedAction === 'draft' ? 'selected' : ''}}" bindtap="saveDraft" disabled="{{(reviewBusy && !voiceActive) || submissionPending || submissionState === 'succeeded'}}">{{voiceActive || fieldEditorVisible ? '取消' : '草稿'}}</button><button class="{{!focusedField && selectedAction === 'confirm' ? 'selected' : ''}}" bindtap="submitBill" disabled="{{reviewBusy || fieldEditorVisible}}">{{submissionState === 'succeeded' || submissionState === 'conflict' ? '继续拍摄' : '确认'}}</button></view>
 </view>

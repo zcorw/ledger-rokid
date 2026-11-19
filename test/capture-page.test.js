@@ -8,7 +8,7 @@ import { createReceiptCredentialStore } from '../aiui/lib/receipt-credential-sto
 import { presentBill, presentVoiceFeedback } from '../aiui/lib/bill-presentation.js';
 import { createVoiceReview } from '../aiui/lib/voice-review.js';
 import * as fieldReview from '../aiui/lib/field-review.js';
-import { createHeadNavigation } from '../aiui/lib/head-navigation.js';
+import { createHeadNavigation, createPageOrientationSensor } from '../aiui/lib/head-navigation.js';
 import { createDraftSaver } from '../aiui/lib/receipt-draft.js';
 import { receiptApiConfig } from '../aiui/lib/receipt-api.js';
 import { createNativeConfirmation } from '../aiui/lib/native-confirmation.js';
@@ -23,6 +23,7 @@ function page(overrides = {}) {
   const events = [], revoked = [], decoded = [], canvasCalls = [], streams = [];
   const headListeners = new Map();
   const orientation = { starts: 0, stops: 0, quaternion: null, addEventListener(type, fn) { headListeners.set(type, fn); }, removeEventListener(type, fn) { if (headListeners.get(type) === fn) headListeners.delete(type); }, start() { this.starts++; }, stop() { this.stops++; }, emit(value) { this.quaternion = value; headListeners.get('reading')?.(); } };
+  let worldStarts = 0, worldStops = 0;
   function stream() {
     const track = { readyState: 'live', stop() { stops++; this.readyState = 'ended'; events.push('stop'); } };
     const value = { getTracks: () => [track], getVideoTracks: () => [track] }; streams.push(value); return value;
@@ -46,9 +47,14 @@ function page(overrides = {}) {
     reviewOptions: async () => ({ version: 1, categories: [{ value: 'food', label: '餐饮' }, { value: 'groceries', label: '日用' }], currencies: [{ value: 'JPY', label: 'JPY 日元' }], accounts: [{ value: '11111111-1111-4111-8111-111111111111', label: '合成微信支付' }] }),
     recognize, close: () => overrides.close?.(), ...overrides.api,
   });
-  const p = new Function(...Object.keys(fieldReview), 'createHeadNavigation', 'wx', 'createViewfinderController', 'createPhotoDisplayController', 'createReceiptRecognitionController', 'createReceiptApi', 'createReceiptCredentialStore', 'presentBill', 'presentVoiceFeedback', 'createVoiceReview', 'createDraftSaver', 'createNativeConfirmation', 'receiptApiConfig', 'globalThis', 'Date', 'console', script)(...Object.values(fieldReview), options => createHeadNavigation({ ...options, now: () => time, sensorFactory: overrides.sensorFactory || (() => orientation) }), wx, createViewfinderController, createPhotoDisplayController, createReceiptRecognitionController, apiFactory, createReceiptCredentialStore, presentBill, presentVoiceFeedback, options => createVoiceReview({ ...options, speechFactory: overrides.speechFactory || (() => { throw new Error('SPEECH_UNSUPPORTED'); }) }), createDraftSaver, createNativeConfirmation, receiptApiConfig, environment, { now: () => time }, overrides.hostConsole || { log() {} });
-  p.setData = function(value) { updates++; Object.assign(this.data, value); }; p.onLoad();
-  return { p, events, revoked, decoded, canvasCalls, stream, orientation, advance(ms) { time += ms; }, counts: () => ({ requests, shots, recognitions, stops, updates }) };
+  const p = new Function(...Object.keys(fieldReview), 'createHeadNavigation', 'createPageOrientationSensor', 'wx', 'createViewfinderController', 'createPhotoDisplayController', 'createReceiptRecognitionController', 'createReceiptApi', 'createReceiptCredentialStore', 'presentBill', 'presentVoiceFeedback', 'createVoiceReview', 'createDraftSaver', 'createNativeConfirmation', 'receiptApiConfig', 'globalThis', 'Date', 'console', script)(...Object.values(fieldReview), options => createHeadNavigation({ ...options, now: () => time, ...(overrides.headTimers || {}) }), page => createPageOrientationSensor(page, overrides.sensorFactory || (() => orientation)), wx, createViewfinderController, createPhotoDisplayController, createReceiptRecognitionController, apiFactory, createReceiptCredentialStore, presentBill, presentVoiceFeedback, options => createVoiceReview({ ...options, speechFactory: overrides.speechFactory || (() => { throw new Error('SPEECH_UNSUPPORTED'); }) }), createDraftSaver, createNativeConfirmation, receiptApiConfig, environment, { now: () => time }, overrides.hostConsole || { log() {} });
+  p.setData = function(value, callback) { const apply = () => { updates++; Object.assign(this.data, value); callback?.call(this); }; if (overrides.deferBill && value.billVisible === true) queueMicrotask(apply); else apply(); };
+  if (!overrides.sensorFactory && overrides.worldAwareness !== false) {
+    p.enableWorldAwareness = () => { worldStarts++; p.orientationSensor = orientation; orientation.start(); };
+    p.disableWorldAwareness = () => { worldStops++; orientation.stop(); };
+  }
+  p.onLoad();
+  return { p, events, revoked, decoded, canvasCalls, stream, orientation, worldCounts: () => ({ starts: worldStarts, stops: worldStops }), advance(ms) { time += ms; }, counts: () => ({ requests, shots, recognitions, stops, updates }) };
 }
 
 test('opening the agent automatically previews after ready, without exposing a photo', async t => {
@@ -360,6 +366,27 @@ test('sensor readings move one field per neutral-returning motion and stop on hi
   r.orientation.emit(down); r.advance(150); r.orientation.emit(down); assert.equal(r.p.data.focusedField, 'expenseDate');
   r.p.onHide(); const updates = r.counts().updates; r.orientation.emit(center); r.advance(500); r.orientation.emit(down);
   assert.equal(r.counts().updates, updates); assert.ok(r.orientation.stops > 0); assert.equal(r.p.headDirection('down'), false);
+});
+test('world awareness starts once after the rendered bill and visible status distinguishes actual readings', async t => {
+  const r = page({ deferBill: true }); t.after(() => r.p.onUnload()); await r.p.onReady(); await r.p.capture();
+  assert.deepEqual(r.worldCounts(), { starts: 1, stops: 0 }); assert.equal(r.orientation.starts, 1);
+  assert.match(r.p.data.headNavigationMessage, /等待姿态/);
+  assert.equal(r.p.data.headNavigationProblem, true);
+  r.p.syncHeadNavigation(); assert.equal(r.worldCounts().starts, 1); assert.match(r.p.data.headNavigationMessage, /等待姿态/);
+  r.orientation.emit([0,0,0,1]); assert.match(r.p.data.headNavigationMessage, /已收到姿态/);
+  r.advance(300); r.orientation.emit([0,0,0,1]); assert.match(r.p.data.headNavigationMessage, /头控就绪/);
+  assert.equal(r.p.data.headNavigationProblem, false);
+  r.advance(600); r.orientation.emit([0,Math.sin(Math.PI/36),0,Math.cos(Math.PI/36)]);
+  assert.match(r.p.data.headNavigationMessage, /左右10°/);
+  r.p.onHide(); assert.equal(r.worldCounts().stops, 1);
+});
+test('a silent but successfully started sensor becomes a visible no-data state and ignores late timers', async t => {
+  let timer = null;
+  const r = page({ headTimers: { schedule: fn => { timer = fn; return 1; }, unschedule: () => { timer = null; } } });
+  t.after(() => r.p.onUnload()); await r.p.onReady(); await r.p.capture(); assert.match(r.p.data.headNavigationMessage, /等待姿态/);
+  const late = timer; r.advance(3000); timer(); assert.match(r.p.data.headNavigationMessage, /未收到姿态数据/);
+  assert.equal(r.orientation.stops, 1); assert.equal(timer, null); assert.equal(r.p.data.focusedField, 'merchant');
+  r.p.onHide(); const updates = r.counts().updates; late(); assert.equal(r.counts().updates, updates);
 });
 test('head or swipe navigation during a held click cannot activate the earlier field or confirm button', async t => {
   const r = voicePage(); t.after(() => r.p.onUnload()); await r.p.onReady(); await r.p.capture(); r.advance(1000);

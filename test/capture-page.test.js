@@ -8,6 +8,7 @@ import { createReceiptCredentialStore } from '../aiui/lib/receipt-credential-sto
 import { presentBill, presentVoiceFeedback } from '../aiui/lib/bill-presentation.js';
 import { createVoiceReview } from '../aiui/lib/voice-review.js';
 import * as fieldReview from '../aiui/lib/field-review.js';
+import { createHeadNavigation } from '../aiui/lib/head-navigation.js';
 import { createDraftSaver } from '../aiui/lib/receipt-draft.js';
 import { receiptApiConfig } from '../aiui/lib/receipt-api.js';
 import { createNativeConfirmation } from '../aiui/lib/native-confirmation.js';
@@ -20,6 +21,8 @@ function key(code, repeat = false) { return { code, repeat, prevented: false, pr
 function page(overrides = {}) {
   let requests = 0, shots = 0, recognitions = 0, stops = 0, updates = 0, urlCount = 0, time = 1000;
   const events = [], revoked = [], decoded = [], canvasCalls = [], streams = [];
+  const headListeners = new Map();
+  const orientation = { starts: 0, stops: 0, quaternion: null, addEventListener(type, fn) { headListeners.set(type, fn); }, removeEventListener(type, fn) { if (headListeners.get(type) === fn) headListeners.delete(type); }, start() { this.starts++; }, stop() { this.stops++; }, emit(value) { this.quaternion = value; headListeners.get('reading')?.(); } };
   function stream() {
     const track = { readyState: 'live', stop() { stops++; this.readyState = 'ended'; events.push('stop'); } };
     const value = { getTracks: () => [track], getVideoTracks: () => [track] }; streams.push(value); return value;
@@ -43,9 +46,9 @@ function page(overrides = {}) {
     reviewOptions: async () => ({ version: 1, categories: [{ value: 'food', label: '餐饮' }, { value: 'groceries', label: '日用' }], currencies: [{ value: 'JPY', label: 'JPY 日元' }], accounts: [{ value: '11111111-1111-4111-8111-111111111111', label: '合成微信支付' }] }),
     recognize, close: () => overrides.close?.(), ...overrides.api,
   });
-  const p = new Function(...Object.keys(fieldReview), 'wx', 'createViewfinderController', 'createPhotoDisplayController', 'createReceiptRecognitionController', 'createReceiptApi', 'createReceiptCredentialStore', 'presentBill', 'presentVoiceFeedback', 'createVoiceReview', 'createDraftSaver', 'createNativeConfirmation', 'receiptApiConfig', 'globalThis', 'Date', 'console', script)(...Object.values(fieldReview), wx, createViewfinderController, createPhotoDisplayController, createReceiptRecognitionController, apiFactory, createReceiptCredentialStore, presentBill, presentVoiceFeedback, options => createVoiceReview({ ...options, speechFactory: overrides.speechFactory || (() => { throw new Error('SPEECH_UNSUPPORTED'); }) }), createDraftSaver, createNativeConfirmation, receiptApiConfig, environment, { now: () => time }, overrides.hostConsole || { log() {} });
+  const p = new Function(...Object.keys(fieldReview), 'createHeadNavigation', 'wx', 'createViewfinderController', 'createPhotoDisplayController', 'createReceiptRecognitionController', 'createReceiptApi', 'createReceiptCredentialStore', 'presentBill', 'presentVoiceFeedback', 'createVoiceReview', 'createDraftSaver', 'createNativeConfirmation', 'receiptApiConfig', 'globalThis', 'Date', 'console', script)(...Object.values(fieldReview), options => createHeadNavigation({ ...options, now: () => time, sensorFactory: overrides.sensorFactory || (() => orientation) }), wx, createViewfinderController, createPhotoDisplayController, createReceiptRecognitionController, apiFactory, createReceiptCredentialStore, presentBill, presentVoiceFeedback, options => createVoiceReview({ ...options, speechFactory: overrides.speechFactory || (() => { throw new Error('SPEECH_UNSUPPORTED'); }) }), createDraftSaver, createNativeConfirmation, receiptApiConfig, environment, { now: () => time }, overrides.hostConsole || { log() {} });
   p.setData = function(value) { updates++; Object.assign(this.data, value); }; p.onLoad();
-  return { p, events, revoked, decoded, canvasCalls, stream, advance(ms) { time += ms; }, counts: () => ({ requests, shots, recognitions, stops, updates }) };
+  return { p, events, revoked, decoded, canvasCalls, stream, orientation, advance(ms) { time += ms; }, counts: () => ({ requests, shots, recognitions, stops, updates }) };
 }
 
 test('opening the agent automatically previews after ready, without exposing a photo', async t => {
@@ -73,13 +76,14 @@ test('one explicit activation captures, recognizes and shows the bill without an
   assert.equal(r.p.controller.snapshot().photo, null); assert.deepEqual(r.p.data.previewItems, []); assert.equal(r.p.data.photoVisible, false);
   assert.equal(await r.p.capture(), false); r.p.onKeyUp(key('Enter')); assert.equal(r.counts().shots, 1);
   const direction = key('ArrowDown'); r.p.onKeyUp(direction); assert.equal(direction.prevented, true);
-  assert.equal(r.p.data.focusedField, 'amount');
+  assert.equal(r.p.data.focusedField, ''); assert.equal(r.p.data.selectedAction, 'voice');
 });
 
 test('review keys move across actions without another shutter and duplicate events are ignored', async t => {
   const r = page(); t.after(() => r.p.onUnload()); await r.p.onReady(); await r.p.capture();
   assert.equal(r.p.data.selectedAction, 'voice');
-  r.p.onKeyUp(key('ArrowLeft')); assert.equal(r.p.data.selectedAction, 'confirm');
+  r.p.onKeyUp(key('ArrowLeft')); assert.equal(r.p.data.selectedAction, 'voice');
+  r.advance(300); r.p.onKeyUp(key('ArrowLeft')); assert.equal(r.p.data.selectedAction, 'confirm');
   r.p.onKeyUp(key('ArrowRight', true)); assert.equal(r.p.data.selectedAction, 'confirm');
   r.p.onKeyDown(key('Enter')); r.p.submitBill(); r.p.onKeyUp(key('Enter'));
   assert.equal(r.counts().shots, 1); assert.equal(r.counts().recognitions, 1);
@@ -283,7 +287,7 @@ function voicePage(correct) {
 test('manual voice input shows all segments and a trailing click cannot stop the new recording', async t => {
   let sentText; const r = voicePage(async (values, text) => { sentText = text; return { values: { ...values, amount: '700' }, changedFields: ['amount'], warnings: [] }; });
   t.after(() => r.p.onUnload()); await r.p.onReady(); await r.p.capture(); r.advance(1000);
-  for (let i = 0; i < 3; i++) r.p.onKeyUp(key('ArrowUp'));
+  r.p.onKeyUp(key('ArrowUp'));
   r.p.onKeyDown(key('Enter')); const pending = r.p.onKeyUp(key('Enter'));
   assert.equal(r.speech.starts, 1); assert.equal(r.p.data.voiceActive, true);
   assert.equal(r.p.voiceEdit(), false); assert.equal(r.speech.stops, 0);
@@ -323,12 +327,59 @@ test('the native result distinguishes a matching merchant, an actual correction 
   }
 });
 
-test('all seven fields precede the three actions on the swipe path', async t => {
+test('swipes restore and cycle only buttons; head motion restores the independent spatial field focus', async t => {
   const r = page(); t.after(() => r.p.onUnload()); await r.p.onReady(); await r.p.capture();
   assert.equal(r.p.data.focusedField, 'merchant');
-  for (const field of ['amount', 'category', 'expenseDate', 'currencyCode', 'account', 'note']) { r.p.onKeyUp(key('ArrowDown')); assert.equal(r.p.data.focusedField, field); }
+  r.p.headDirection('down'); r.p.headDirection('right'); assert.equal(r.p.data.focusedField, 'category');
   for (const action of ['voice', 'draft', 'confirm']) { r.p.onKeyUp(key('ArrowDown')); assert.equal(r.p.data.focusedField, ''); assert.equal(r.p.data.selectedAction, action); }
-  r.p.onKeyUp(key('ArrowDown')); assert.equal(r.p.data.focusedField, 'merchant'); r.p.onKeyUp(key('ArrowUp')); assert.equal(r.p.data.selectedAction, 'confirm');
+  r.p.headDirection('up'); assert.equal(r.p.data.focusedField, 'category'); assert.equal(r.p.data.selectedAction, 'confirm');
+  r.p.headDirection('down'); assert.equal(r.p.data.focusedField, 'currencyCode');
+  r.p.onKeyUp(key('ArrowUp')); assert.equal(r.p.data.focusedField, ''); assert.equal(r.p.data.selectedAction, 'confirm');
+  r.p.onKeyUp(key('ArrowUp')); assert.equal(r.p.data.selectedAction, 'draft');
+  r.p.headDirection('left'); assert.equal(r.p.data.focusedField, 'currencyCode');
+  r.p.headDirection('left'); assert.equal(r.p.data.focusedField, 'expenseDate');
+  r.p.onKeyUp(key('ArrowDown')); assert.equal(r.p.data.selectedAction, 'draft'); assert.equal(r.p.data.focusedField, '');
+  assert.equal(r.counts().shots, 1); assert.equal(r.p.data.voiceActive, false);
+});
+test('one temple swipe reported on both axes restores or advances a button only once', async t => {
+  const r = page(); t.after(() => r.p.onUnload()); await r.p.onReady(); await r.p.capture();
+  r.p.onKeyUp(key('ArrowDown')); r.advance(15); r.p.onKeyUp(key('ArrowRight'));
+  assert.equal(r.p.data.selectedAction, 'voice'); assert.equal(r.p.data.focusedField, '');
+  r.advance(300); r.p.onKeyUp(key('ArrowDown')); r.advance(15); r.p.onKeyUp(key('ArrowRight'));
+  assert.equal(r.p.data.selectedAction, 'draft');
+  r.advance(15); r.p.onKeyUp(key('ArrowDown', true)); assert.equal(r.p.data.selectedAction, 'draft');
+});
+test('sensor readings move one field per neutral-returning motion and stop on hide', async t => {
+  const r = page(); t.after(() => r.p.onUnload()); await r.p.onReady(); assert.equal(r.orientation.starts, 0); await r.p.capture();
+  assert.equal(r.orientation.starts, 1);
+  const center = [0, 0, 0, 1], down = [-Math.sin(Math.PI / 18), 0, 0, Math.cos(Math.PI / 18)];
+  r.orientation.emit(center); r.advance(300); r.orientation.emit(center);
+  r.orientation.emit(down); r.advance(150); r.orientation.emit(down); assert.equal(r.p.data.focusedField, 'amount');
+  r.advance(1000); r.orientation.emit(down); assert.equal(r.p.data.focusedField, 'amount');
+  r.orientation.emit(center); r.advance(200); r.orientation.emit(center);
+  r.orientation.emit(down); r.advance(150); r.orientation.emit(down); assert.equal(r.p.data.focusedField, 'expenseDate');
+  r.p.onHide(); const updates = r.counts().updates; r.orientation.emit(center); r.advance(500); r.orientation.emit(down);
+  assert.equal(r.counts().updates, updates); assert.ok(r.orientation.stops > 0); assert.equal(r.p.headDirection('down'), false);
+});
+test('head or swipe navigation during a held click cannot activate the earlier field or confirm button', async t => {
+  const r = voicePage(); t.after(() => r.p.onUnload()); await r.p.onReady(); await r.p.capture(); r.advance(1000);
+  r.p.onKeyDown(key('Enter')); r.p.onKeyUp(key('ArrowDown')); assert.equal(r.p.onKeyUp(key('Enter')), false);
+  r.p.onKeyUp(key('ArrowUp')); assert.equal(r.p.data.selectedAction, 'confirm');
+  r.p.onKeyDown(key('Enter')); r.p.headDirection('down'); assert.equal(r.p.onKeyUp(key('Enter')), false);
+  assert.equal(r.speech.starts, 0); assert.equal(r.p.data.reviewMessage, ''); assert.equal(r.voiceCounts().drafts, 0);
+});
+test('head input is unavailable during financial recovery and does not unlock fields', async t => {
+  const r = page(); t.after(() => r.p.onUnload()); await r.p.onReady(); await r.p.capture();
+  r.p.data.submissionPending = true; r.p.syncHeadNavigation();
+  assert.equal(r.p.headDirection('right'), false); assert.ok(r.orientation.stops > 0);
+  r.p.onKeyUp(key('ArrowDown')); assert.equal(r.p.data.focusedField, ''); assert.equal(r.p.data.selectedAction, 'confirm');
+  assert.equal(r.p.editField('amount'), false); assert.equal(r.counts().shots, 1);
+});
+test('an unsupported sensor reports the limitation while swipe navigation stays in the buttons', async t => {
+  const r = page({ sensorFactory: () => { throw new Error('unsupported'); } }); t.after(() => r.p.onUnload());
+  await r.p.onReady(); await r.p.capture(); assert.match(r.p.data.headNavigationMessage, /无法启用头部选择/);
+  for (let i = 0; i < 12; i++) { r.p.onKeyUp(key('ArrowDown')); assert.equal(r.p.data.focusedField, ''); }
+  assert.equal(r.p.data.voiceActive, false); assert.equal(r.counts().shots, 1);
 });
 test('the selected field isolates changes and a trailing tap cannot stop its recording', async t => {
   const r = voicePage(async (values, transcript, options) => {
@@ -336,7 +387,7 @@ test('the selected field isolates changes and a trailing tap cannot stop its rec
     return { values: { ...values, amount: '700', merchant: 'wrong', currencyCode: 'USD' }, changedFields: ['amount', 'merchant', 'currencyCode'], warnings: [], fieldOutcome: 'matched' };
   });
   t.after(() => r.p.onUnload()); await r.p.onReady(); await r.p.capture(); r.advance(1000);
-  r.p.onKeyUp(key('ArrowDown')); r.p.onKeyDown(key('Enter')); const pending = r.p.onKeyUp(key('Enter'));
+  r.p.headDirection('down'); r.p.onKeyDown(key('Enter')); const pending = r.p.onKeyUp(key('Enter'));
   assert.equal(r.p.data.fieldEditorVisible, true); assert.equal(r.p.data.fieldTitle, '金额'); assert.equal(r.p.voiceEdit(), false); assert.equal(r.speech.stops, 0);
   r.speech.onresult(spoken(['七百日元'])); r.advance(1000); r.p.voiceEdit(); r.speech.onend(); await pending;
   assert.equal(r.p.reviewValues.amount, '700'); assert.equal(r.p.reviewValues.merchant, '测试商户'); assert.equal(r.p.reviewValues.currencyCode, 'JPY');
@@ -358,15 +409,20 @@ test('leaving a field aborts loading and ignores late option results', async () 
   r.p.onHide(); assert.equal(optionSignal.aborted, true); delayed.resolve({ version: 1, categories: [], currencies: [], accounts: [] }); await pending; await flush();
   assert.equal(r.p.reviewOptions, null); assert.deepEqual(r.p.data.fieldOptions, []); assert.equal(r.p.data.fieldEditorVisible, false); assert.equal(r.p.data.voiceTranscript, ''); r.p.onUnload();
 });
-test('temple directions scroll choices in the same page and keep Stop reachable', async t => {
+test('only head Up/Down scrolls choices; temple swipes select controls without losing the remembered button', async t => {
   const r = voicePage(); t.after(() => r.p.onUnload()); await r.p.onReady(); await r.p.capture(); await flush(); r.advance(1000);
+  r.p.onKeyUp(key('ArrowDown')); r.p.onKeyUp(key('ArrowDown')); assert.equal(r.p.data.selectedAction, 'draft');
+  r.p.headDirection('up');
   const pending = r.p.editField('account');
-  r.p.onKeyUp(key('ArrowDown')); assert.equal(r.p.data.fieldOptionsScrollTop, 36); assert.equal(r.p.data.selectedAction, 'voice');
+  r.p.onKeyUp(key('ArrowDown')); assert.equal(r.p.data.fieldOptionsScrollTop, 0); assert.equal(r.p.data.selectedAction, 'draft');
+  r.p.headDirection('down'); assert.equal(r.p.data.fieldOptionsScrollTop, 36); assert.equal(r.p.data.selectedAction, 'draft');
   r.p.optionsScrolled({ detail: { scrollTop: 90, scrollHeight: 150, clientHeight: 60 } });
-  r.p.onKeyUp(key('ArrowDown')); assert.equal(r.p.data.fieldOptionsScrollTop, 90);
-  r.p.onKeyUp(key('ArrowUp')); assert.equal(r.p.data.fieldOptionsScrollTop, 54);
+  r.p.headDirection('down'); assert.equal(r.p.data.fieldOptionsScrollTop, 90);
+  r.p.headDirection('up'); assert.equal(r.p.data.fieldOptionsScrollTop, 54);
+  assert.equal(r.p.headDirection('left'), false); assert.equal(r.p.data.focusedField, 'account');
   assert.equal(r.p.data.fieldOptions.length, 1); r.p.onKeyUp(key('Backspace')); await pending;
   assert.equal(r.p.data.billVisible, true); assert.equal(r.voiceCounts().drafts, 0);
+  r.p.onKeyUp(key('ArrowDown')); assert.equal(r.p.data.selectedAction, 'draft'); assert.equal(r.p.data.focusedField, '');
 });
 
 test('the cancel action uses the draft button without saving, including trailing key/tap events', async t => {

@@ -1,7 +1,15 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { parseReviewOptions, choicesFor, scopeFieldResult, fieldFeedback } from '../aiui/lib/field-review.js';
+import { parseReviewOptions, choicesFor, scopeFieldResult, fieldFeedback, moveFieldFocus } from '../aiui/lib/field-review.js';
 const original = { amount: '972', merchant: 'SEIYU', currencyCode: 'JPY', category: '', expenseDate: '2026-11-17', accountId: '', accountName: '', note: '' };
+test('spatial field navigation follows the actual rows, remembers columns and clamps edges', () => {
+  let focus = { field: 'merchant', column: 0 };
+  for (const [direction, field] of [['up', 'merchant'], ['down', 'amount'], ['left', 'amount'], ['right', 'category'], ['right', 'category'], ['down', 'currencyCode'], ['down', 'note'], ['down', 'note'], ['left', 'account'], ['up', 'expenseDate'], ['up', 'amount']]) {
+    focus = moveFieldFocus(focus.field, direction, focus.column); assert.equal(focus.field, field);
+  }
+  focus = moveFieldFocus('category', 'up'); assert.deepEqual(focus, { field: 'merchant', column: 1 });
+  assert.deepEqual(moveFieldFocus(focus.field, 'down', focus.column), { field: 'category', column: 1 });
+});
 test('scoped corrections ignore off-target values and untrusted changedFields', () => {
   const result = scopeFieldResult(original, 'amount', { values: { ...original, amount: '700', merchant: 'wrong', currencyCode: 'USD' }, changedFields: ['merchant'], warnings: [], fieldOutcome: 'matched' });
   assert.deepEqual(result.values, { ...original, amount: '700' }); assert.deepEqual(result.changedFields, ['amount']);
